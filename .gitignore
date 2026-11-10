@@ -1,0 +1,5 @@
+*.exe
+*.tmp
+*.log
+profile/
+.CPV/
