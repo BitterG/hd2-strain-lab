@@ -186,3 +186,65 @@ func TestUIViewTuringNativeAndCustomEffects(t *testing.T) {
 	}
 }
 
+func TestUIViewDeleteConfiguredTargetsNoPanic(t *testing.T) {
+	t.Setenv("HD2_MY_CPV_PROFILE", t.TempDir())
+
+	app, err := NewApp()
+	if err != nil {
+		t.Fatalf("NewApp failed: %v", err)
+	}
+	defer app.stopProxy()
+
+	tt := ui.NewTester(app.View, 1380, 860)
+
+	// Configure two planets (#1 and #126)
+	if err := tt.Click("克伦达斯II"); err != nil {
+		t.Fatalf("click planet #1 failed: %v", err)
+	}
+	firstEff := app.galaxy.Effects[0]
+	if err := tt.Click(firstEff.Name); err != nil {
+		t.Fatalf("click effect failed: %v", err)
+	}
+	if err := tt.Click("保存并下发到代理"); err != nil {
+		t.Fatalf("save planet #1 failed: %v", err)
+	}
+
+	xy126, ok126 := app.starMap.screenXY[126]
+	if !ok126 {
+		t.Fatalf("expected projected coordinates for planet #126")
+	}
+	tt.ClickAt(xy126[0], xy126[1])
+	if len(app.selectedIDs) != 1 || app.selectedIDs[0] != 126 {
+		t.Fatalf("expected planet 126 selected, got %v", app.selectedIDs)
+	}
+	if err := tt.Click(firstEff.Name); err != nil {
+		t.Fatalf("click effect for #126 failed: %v", err)
+	}
+	if err := tt.Click("保存并下发到代理"); err != nil {
+		t.Fatalf("save planet #126 failed: %v", err)
+	}
+	if len(app.plan.Targets) != 2 {
+		t.Fatalf("expected 2 configured targets, got %d", len(app.plan.Targets))
+	}
+
+	// Switch to configured targets list view and delete the first target (index 0 of 2), then the remaining target.
+	if err := tt.Click("查看全部已配置"); err != nil {
+		t.Fatalf("click view all configured failed: %v", err)
+	}
+	if !tt.HasText("已配置星球方案 (2)") {
+		t.Fatalf("expected configured targets panel (2)")
+	}
+	if err := tt.Click("删"); err != nil {
+		t.Fatalf("click delete first target failed: %v", err)
+	}
+	if len(app.plan.Targets) != 1 {
+		t.Fatalf("expected 1 target left after first delete, got %d", len(app.plan.Targets))
+	}
+	if err := tt.Click("删"); err != nil {
+		t.Fatalf("click delete last target failed: %v", err)
+	}
+	if len(app.plan.Targets) != 0 {
+		t.Fatalf("expected 0 targets left after deleting last, got %d", len(app.plan.Targets))
+	}
+}
+

@@ -526,8 +526,8 @@ func (a *App) buildConfiguredList(c *ui.Context) {
 		}
 		ui.Scroll(c.Key("cfg-scroll")).Grow(1).FillWidth().Children(func() {
 			ui.Column(c).Gap(6).Children(func() {
-				for idx := range a.plan.Targets {
-					t := a.plan.Targets[idx]
+				targets := slices.Clone(a.plan.Targets)
+				for _, t := range targets {
 					pl := a.galaxy.PlanetsByID[t.Planet]
 					name := fmt.Sprintf("星球 #%d", t.Planet)
 					if pl != nil {
