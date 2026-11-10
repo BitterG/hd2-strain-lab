@@ -248,3 +248,61 @@ func TestUIViewDeleteConfiguredTargetsNoPanic(t *testing.T) {
 	}
 }
 
+func TestUIViewCopyPlanetEffectsToAnotherPlanet(t *testing.T) {
+	t.Setenv("HD2_STRAIN_LAB_PROFILE", t.TempDir())
+
+	app, err := NewApp()
+	if err != nil {
+		t.Fatalf("NewApp failed: %v", err)
+	}
+	defer app.stopProxy()
+
+	tt := ui.NewTester(app.View, 1380, 860)
+
+	// Select Turing (#126) which has native effects in offline snapshot
+	xy126, ok126 := app.starMap.screenXY[126]
+	if !ok126 {
+		t.Fatalf("expected projected coordinates for Turing (#126)")
+	}
+	tt.ClickAt(xy126[0], xy126[1])
+	native := app.selectedNativeEffects()
+	if len(native) < 2 {
+		t.Fatalf("expected >= 2 native effects on Turing, got %v", native)
+	}
+
+	// Cancel the first native effect and add one custom effect
+	app.toggleDisableNativeEffect(native[0])
+	firstEff := app.galaxy.Effects[0]
+	if err := tt.Click(firstEff.Name); err != nil {
+		t.Fatalf("click custom effect failed: %v", err)
+	}
+	expectedCount := (len(native) - 1) + 1
+
+	// Click "拷贝效果到..." then select destination planet #1 (克伦达斯II)
+	if err := tt.Click("拷贝效果到..."); err != nil {
+		t.Fatalf("click copy effects button failed: %v", err)
+	}
+	if !app.starMap.PickingCopyTarget {
+		t.Fatalf("expected PickingCopyTarget true")
+	}
+	if !tt.HasText("请点击目标星球") {
+		t.Fatalf("expected copy banner on star map")
+	}
+
+	if err := tt.Click("克伦达斯II"); err != nil {
+		t.Fatalf("click destination planet #1 failed: %v", err)
+	}
+	if app.starMap.PickingCopyTarget {
+		t.Fatalf("expected PickingCopyTarget cleared after selecting destination")
+	}
+	if len(app.selectedIDs) != 1 || app.selectedIDs[0] != 1 {
+		t.Fatalf("expected selection moved to destination planet 1, got %v", app.selectedIDs)
+	}
+	if len(app.plan.Targets) != 1 || app.plan.Targets[0].Planet != 1 {
+		t.Fatalf("expected dispatched target for planet 1, got %+v", app.plan.Targets)
+	}
+	if got := len(app.plan.Targets[0].Effects); got != expectedCount {
+		t.Fatalf("expected %d copied effects on planet 1, got %v", expectedCount, app.plan.Targets[0].Effects)
+	}
+}
+

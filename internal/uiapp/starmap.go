@@ -34,8 +34,9 @@ type StarMapState struct {
 	ShowFog    bool
 	ShowLabels bool
 
-	HoveredID     int // -1 if none
-	PickingSource bool
+	HoveredID         int // -1 if none
+	PickingSource     bool
+	PickingCopyTarget bool
 	LastBoxX      float32
 	LastBoxY      float32
 	LastBoxW      float32
@@ -613,6 +614,10 @@ func (a *App) buildStarMap(c *ui.Context) {
 							m.PickingSource = false
 							return true
 						}
+						if m.PickingCopyTarget {
+							_ = a.applyCopyEffectsTo(pid)
+							return true
+						}
 						if ev.Clicks >= 2 {
 							if p := g.PlanetsByID[pid]; p != nil {
 								m.FocusPlanet(p)
@@ -620,7 +625,7 @@ func (a *App) buildStarMap(c *ui.Context) {
 						}
 						a.handleMapSelect(pid, ev.Mods)
 						return true
-					} else if ev.Mods&(ui.Ctrl|ui.Shift) == 0 && !m.PickingSource {
+					} else if ev.Mods&(ui.Ctrl|ui.Shift) == 0 && !m.PickingSource && !m.PickingCopyTarget {
 						a.selectedIDs = nil
 						return true
 					}
@@ -804,6 +809,19 @@ func (a *App) buildStarMap(c *ui.Context) {
 					m.PickingSource = false
 				}
 			})
+		} else if m.PickingCopyTarget {
+			srcName := fmt.Sprintf("星球 #%d", a.copySourceID)
+			if sp := g.PlanetsByID[a.copySourceID]; sp != nil {
+				srcName = fmt.Sprintf("%s (#%d)", sp.DisplayName(), sp.ID)
+			}
+			ui.Row(c).Absolute().Top(12).Left(260).Padding(8, 14).Gap(10).Radius(999).
+				Background(ui.RGBA(14, 116, 144, 0.94)).Border(1, CyanBright).Children(func() {
+				ui.Textf(c, "拷贝 [%s] 的 %d 项效果 → 请点击目标星球", srcName, len(a.copyEffectIDs)).FontSize(12).Bold().TextColor(ui.Hex("#FFFFFF"))
+				if ui.Button(c.Key("cancel-copy"), "取消").Clicked() {
+					m.PickingCopyTarget = false
+					a.copyEffectIDs = nil
+				}
+			})
 		}
 
 		// Top-right Map Controls
@@ -962,6 +980,10 @@ func mClamp(v, lo, hi float32) float32 {
 }
 
 func (a *App) handleMapSelect(pid int, mods ui.Modifiers) {
+	if a.starMap.PickingCopyTarget {
+		_ = a.applyCopyEffectsTo(pid)
+		return
+	}
 	if mods&ui.Ctrl != 0 {
 		idx := slices.Index(a.selectedIDs, pid)
 		if idx >= 0 {

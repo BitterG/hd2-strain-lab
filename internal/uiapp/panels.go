@@ -209,6 +209,13 @@ func (a *App) buildVariantTab(c *ui.Context) {
 					c.Toast("已保存并热重载下发到代理")
 				}
 			}
+			copyLbl := "拷贝效果到..."
+			if a.starMap.PickingCopyTarget {
+				copyLbl = "取消拷贝"
+			}
+			if ui.Button(c.Key("copy-eff-to"), copyLbl).Clicked() {
+				a.startCopyEffects(c)
+			}
 			if a.anySelectedConfigured() {
 				if ui.Button(c.Key("del-sel"), "移除方案").Clicked() {
 					a.removeSelectionTargets()

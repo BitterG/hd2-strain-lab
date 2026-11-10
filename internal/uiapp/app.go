@@ -54,6 +54,9 @@ type App struct {
 	draftDefHoursF float64
 	draftDefCountF float64
 
+	copySourceID  int
+	copyEffectIDs []int
+
 	refreshing bool
 	toastMsg   string
 }
@@ -351,6 +354,112 @@ func (a *App) selectedNativeEffects() []int {
 	return out
 }
 
+func (a *App) currentEffectiveEffects() []int {
+	dis := make(map[int]bool, len(a.draft.DisabledNativeEffects))
+	for _, eid := range a.draft.DisabledNativeEffects {
+		dis[eid] = true
+	}
+	seen := make(map[int]bool)
+	var out []int
+	for _, eid := range a.selectedNativeEffects() {
+		if !dis[eid] && !seen[eid] {
+			seen[eid] = true
+			out = append(out, eid)
+		}
+	}
+	for _, eid := range a.draft.Effects {
+		if !seen[eid] {
+			seen[eid] = true
+			out = append(out, eid)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+func (a *App) startCopyEffects(c *ui.Context) {
+	if a.starMap.PickingCopyTarget {
+		a.starMap.PickingCopyTarget = false
+		a.copyEffectIDs = nil
+		return
+	}
+	if len(a.selectedIDs) == 0 {
+		c.Toast("请先选中一颗源星球")
+		return
+	}
+	effs := a.currentEffectiveEffects()
+	if len(effs) == 0 {
+		c.Toast("当前选中星球没有可拷贝的生效效果")
+		return
+	}
+	a.starMap.PickingSource = false
+	a.starMap.PickingCopyTarget = true
+	a.copySourceID = a.selectedIDs[0]
+	a.copyEffectIDs = effs
+	c.Toast(fmt.Sprintf("请在星图或左侧列表点击目标星球，接收 %d 项效果", len(effs)))
+}
+
+func (a *App) applyCopyEffectsTo(pid int) error {
+	a.starMap.PickingCopyTarget = false
+	effs := append([]int(nil), a.copyEffectIDs...)
+	a.copyEffectIDs = nil
+	if len(effs) == 0 {
+		return nil
+	}
+	if pid == a.copySourceID {
+		a.toastMsg = "目标星球与源星球相同，已取消拷贝"
+		return nil
+	}
+
+	tm := a.targetMap()
+	tgt, ok := tm[pid]
+	if !ok {
+		tgt = config.DefaultTarget(pid)
+	} else {
+		tgt.Effects = append([]int(nil), tgt.Effects...)
+		tgt.DisabledNativeEffects = append([]int(nil), tgt.DisabledNativeEffects...)
+	}
+	tgt.Enabled = true
+
+	destNative := make(map[int]bool)
+	if pl := a.galaxy.PlanetsByID[pid]; pl != nil {
+		for _, eid := range pl.ActiveEffects {
+			destNative[eid] = true
+		}
+	}
+	copiedSet := make(map[int]bool, len(effs))
+	nextCustom := make([]int, 0, len(effs))
+	for _, eid := range effs {
+		copiedSet[eid] = true
+		if !destNative[eid] {
+			nextCustom = append(nextCustom, eid)
+		}
+	}
+	keptDisabled := tgt.DisabledNativeEffects[:0]
+	for _, eid := range tgt.DisabledNativeEffects {
+		if !copiedSet[eid] {
+			keptDisabled = append(keptDisabled, eid)
+		}
+	}
+	tgt.DisabledNativeEffects = keptDisabled
+	tgt.Effects = nextCustom
+
+	tm[pid] = tgt
+	if err := a.commitTargetMap(tm); err != nil {
+		a.toastMsg = "拷贝失败: " + err.Error()
+		return err
+	}
+	a.selectedIDs = []int{pid}
+	a.syncDraftFromSelection()
+
+	destName := fmt.Sprintf("星球 #%d", pid)
+	if pl := a.galaxy.PlanetsByID[pid]; pl != nil {
+		destName = fmt.Sprintf("%s (#%d)", pl.DisplayName(), pid)
+	}
+	a.toastMsg = fmt.Sprintf("已将 %d 项效果拷贝并下发到 %s", len(effs), destName)
+	return nil
+}
+
 func (a *App) applyDraftToSelection(c *ui.Context) error {
 	if len(a.selectedIDs) == 0 {
 		return fmt.Errorf("请先选择至少一颗星球")
@@ -363,6 +472,10 @@ func (a *App) applyDraftToSelection(c *ui.Context) error {
 		t.DisabledNativeEffects = append([]int(nil), a.draft.DisabledNativeEffects...)
 		tm[pid] = t
 	}
+	return a.commitTargetMap(tm)
+}
+
+func (a *App) commitTargetMap(tm map[int]config.PlanetTarget) error {
 	nextTargets := make([]config.PlanetTarget, 0, len(tm))
 	for _, t := range tm {
 		nextTargets = append(nextTargets, t)
