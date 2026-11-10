@@ -77,6 +77,34 @@ func TestGlobalEventsMergedIntoPlanetActiveEffects(t *testing.T) {
 	}
 }
 
+func TestSpaceStationsMergedIntoPlanetActiveEffects(t *testing.T) {
+	g, err := LoadEmbedded()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := []byte(`{
+		"warId": 801,
+		"time": 86387510,
+		"planetStatus": [{"index": 168, "owner": 2, "health": 1000000, "players": 25000, "position": {"x": 0.42, "y": 0.34}}],
+		"planetActiveEffects": [{"index": 168, "galacticEffectId": 1395}],
+		"spaceStations": [{"id32": 749875195, "planetIndex": 168, "activeEffectIds": [1238, 1261, 1262, 1384, 1385], "flags": 1}]
+	}`)
+	if err := g.ApplyStatusBytes(st, "test"); err != nil {
+		t.Fatal(err)
+	}
+	p := g.PlanetsByID[168]
+	// Expect [1217 1238 1261 1262 1384 1385 1395]
+	expected := []int{1217, 1238, 1261, 1262, 1384, 1385, 1395}
+	if len(p.ActiveEffects) != len(expected) {
+		t.Fatalf("expected active effects %v, got %v", expected, p.ActiveEffects)
+	}
+	for i, id := range expected {
+		if p.ActiveEffects[i] != id {
+			t.Fatalf("expected active effects %v, got %v", expected, p.ActiveEffects)
+		}
+	}
+}
+
 func TestRefreshFromLiveAPI(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()

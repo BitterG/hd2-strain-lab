@@ -206,3 +206,71 @@ func TestRewriteStatusDisableGlobalEventEffects(t *testing.T) {
 		t.Fatalf("expected all disabled effects gone on planet 124")
 	}
 }
+
+func TestRewriteStatusDisableSpaceStationEffects(t *testing.T) {
+	raw := []byte(`{
+		"warId": 801,
+		"time": 86387510,
+		"planetStatus": [{"index": 168, "owner": 2, "health": 1000000}],
+		"planetActiveEffects": [{"index": 168, "galacticEffectId": 1395}],
+		"campaigns": [],
+		"spaceStations": [
+			{"id32": 749875195, "planetIndex": 168, "activeEffectIds": [1238, 1261, 1262], "flags": 1}
+		]
+	}`)
+	ctx := &RewriteContext{
+		AllowAllEffects: true,
+		CampaignIDs:     make(map[int]int),
+		DefenseStates:   make(map[int]DefenseState),
+	}
+
+	// Case 1: disable one DSS activeEffectId (1261) while keeping the DSS itself (#1217)
+	planPartial := config.Plan{
+		Schema: 2,
+		Targets: []config.PlanetTarget{
+			{Planet: 168, Enabled: true, DisabledNativeEffects: []int{1261}},
+		},
+	}
+	out1, sum1, err := RewriteStatus(raw, planPartial, ctx)
+	if err != nil {
+		t.Fatalf("RewriteStatus partial failed: %v", err)
+	}
+	if sum1.EffectsRemoved != 1 {
+		t.Fatalf("expected 1 removed, got %+v", sum1)
+	}
+	var doc1 map[string]any
+	if err := json.Unmarshal(out1, &doc1); err != nil {
+		t.Fatal(err)
+	}
+	ss1 := doc1["spaceStations"].([]any)
+	if len(ss1) != 1 {
+		t.Fatalf("expected spaceStation kept when 1217 not disabled, got %v", ss1)
+	}
+	effs1 := ss1[0].(map[string]any)["activeEffectIds"].([]any)
+	if len(effs1) != 2 || int(effs1[0].(float64)) != 1238 || int(effs1[1].(float64)) != 1262 {
+		t.Fatalf("expected [1238 1262] remaining, got %v", effs1)
+	}
+
+	// Case 2: disable #1217 (民主空间站) removes the station from spaceStations
+	planFull := config.Plan{
+		Schema: 2,
+		Targets: []config.PlanetTarget{
+			{Planet: 168, Enabled: true, DisabledNativeEffects: []int{1217}},
+		},
+	}
+	out2, sum2, err := RewriteStatus(raw, planFull, ctx)
+	if err != nil {
+		t.Fatalf("RewriteStatus full failed: %v", err)
+	}
+	if sum2.EffectsRemoved != 1 {
+		t.Fatalf("expected 1 station removal, got %+v", sum2)
+	}
+	var doc2 map[string]any
+	if err := json.Unmarshal(out2, &doc2); err != nil {
+		t.Fatal(err)
+	}
+	ss2 := doc2["spaceStations"].([]any)
+	if len(ss2) != 0 {
+		t.Fatalf("expected spaceStations empty when #1217 disabled, got %v", ss2)
+	}
+}

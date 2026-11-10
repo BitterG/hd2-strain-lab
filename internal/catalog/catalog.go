@@ -249,6 +249,12 @@ type statusJSON struct {
 		EffectIDs     []int `json:"effectIds"`
 		PlanetIndices []int `json:"planetIndices"`
 	} `json:"globalEvents"`
+	SpaceStations []struct {
+		ID32            uint32 `json:"id32"`
+		PlanetIndex     int    `json:"planetIndex"`
+		ActiveEffectIDs []int  `json:"activeEffectIds"`
+		Flags           int    `json:"flags"`
+	} `json:"spaceStations"`
 }
 
 // LoadEmbedded builds the complete initial GalaxyData from bundled offline assets.
@@ -490,6 +496,16 @@ func (g *GalaxyData) applyStatusStruct(st *statusJSON, sourceNote string) {
 			for _, eid := range ge.EffectIDs {
 				addPlanetEffect(pid, eid)
 			}
+		}
+	}
+	for _, ss := range st.SpaceStations {
+		if ss.Flags == 0 && len(ss.ActiveEffectIDs) == 0 {
+			continue
+		}
+		// DSS orbiting a planet displays #1217 (民主空间站) plus its activeEffectIds.
+		addPlanetEffect(ss.PlanetIndex, 1217)
+		for _, eid := range ss.ActiveEffectIDs {
+			addPlanetEffect(ss.PlanetIndex, eid)
 		}
 	}
 	for _, p := range g.PlanetsByID {

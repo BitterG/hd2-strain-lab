@@ -381,6 +381,47 @@ func RewriteStatus(raw []byte, plan config.Plan, ctx *RewriteContext) ([]byte, R
 				}
 			}
 		}
+
+		// Also remove disabled DSS station (#1217) or its activeEffectIds from spaceStations
+		if ssList, okSS := asSlice(res["spaceStations"]); okSS {
+			keptSS := make([]any, 0, len(ssList))
+			changedSS := false
+			for _, ssRaw := range ssList {
+				ss, okM := asMap(ssRaw)
+				if !okM {
+					keptSS = append(keptSS, ssRaw)
+					continue
+				}
+				pid, okP := asInt(ss["planetIndex"])
+				if !okP {
+					keptSS = append(keptSS, ssRaw)
+					continue
+				}
+				if disabledPairs[pairKey{pid, 1217}] {
+					changedSS = true
+					summary.EffectsRemoved++
+					summary.ChangedCount++
+					continue
+				}
+				if rawEffs, okE := asSlice(ss["activeEffectIds"]); okE && len(rawEffs) > 0 {
+					keptEffs := make([]any, 0, len(rawEffs))
+					for _, r := range rawEffs {
+						if eid, okID := asInt(r); okID && disabledPairs[pairKey{pid, eid}] {
+							changedSS = true
+							summary.EffectsRemoved++
+							summary.ChangedCount++
+							continue
+						}
+						keptEffs = append(keptEffs, r)
+					}
+					ss["activeEffectIds"] = keptEffs
+				}
+				keptSS = append(keptSS, ss)
+			}
+			if changedSS {
+				res["spaceStations"] = keptSS
+			}
+		}
 	}
 
 	// Add effects
