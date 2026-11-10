@@ -18,6 +18,31 @@
    - 自动生成本机 CA、支持安装/移除到 Windows `CurrentUser\ROOT`（无需管理员权限修改 `hosts`），内置 loopback CRL 吊销服务避免 Schannel 校验失败。
    - 支持单 EXE `--steam-bridge %command%` Steam 启动桥接与方案热重载下发。
 
+## 简单使用说明
+
+1. **首次配置（只需做一次）**
+   - 运行 `hd2-strain-lab.exe`，切换到右侧 **「代理下发与连接」** 标签页。
+   - 点击 **「安装证书信任」**，将本地 CA 写入当前用户受信任根证书库（不修改 `hosts` 或系统全局策略）。
+   - 点击 **「复制 Steam 启动选项」**，打开 Steam → 《绝地潜兵 2》→ **属性 → 通用 → 启动选项**，粘贴进去（形如 `"...\hd2-strain-lab.exe" --steam-bridge %command%`）。
+     > 未开启代理时启动游戏会自动直连官方服务器；仅在你点击 **「启动代理服务」** 后才会拦截并改写战况响应。
+
+2. **选择星球并配置变种 / 原版效果**
+   - 等待顶部自动同步（或手动点击 **「同步实时战况」**）刷新当前星图。
+   - 在星图或左侧导航点击任意星球（按住 `Ctrl + 单击` 可多选批量配置）：
+     - 在 **「原版自带效果」** 中点击即可取消或恢复星球原本附带的变种、阴霾、SEAF 驻守或民主空间站（DSS）等效果；
+     - 在 **「星系效果与变种」** 目录搜中文/英文/ID 并勾选要叠加的自定义效果（支持成对自动补全）；
+     - 如目标星球当前未开放，可展开 **「战役与归属参数」** 勾选强制开放、自定义归属阵营或发起防守战役。
+   - 完成后点击 **「保存并下发到代理」**。
+
+3. **启动代理并进入游戏**
+   - 在 **「代理下发与连接」** 点击 **「启动代理服务」**，然后从 Steam 启动游戏即可。
+   - 修改已有方案后只需点击 **「保存并下发到代理」** 或 **「热重载下发配置」**，返回舰桥/刷新星图即生效，无需重启软件。
+   - 如使用了 HTTP 加速器，可在 **「加速器兼容与下发选项」** 勾选上游 HTTP 代理并填入加速器的本地端口（如 `http://127.0.0.1:7890`）；平时用虚拟网卡/进程模式加速则保持默认直连即可。
+
+4. **注意事项**
+   - 星球变种、敌情、增减益和强开战役配置一般需**自己担任房主**才会在局内生效。
+   - 不需要使用变种时，在软件内点击 **「停止代理」** 或直接关闭软件，游戏即恢复官方原版状态。
+
 ## 构建与运行
 
 需要 Go 1.27.3+（本项目默认使用 `D:\go1.27.3.windows-amd64\go`）：
@@ -31,8 +56,7 @@
 
 - [custom-planets-variants](https://github.com/127MU/custom-planets-variants)
 - [Helldivers Wiki (Illuminate)](https://helldivers.wiki.gg/wiki/Illuminate)
-- [Helldivers Wiki](https://helldivers.wiki.gg)
 - [HD2 中文维基 / 银河地图参考](https://jerry114514.github.io/HD2_Wiki/wiki.html)
 - [egoist/mygo](https://github.com/egoist/mygo)
-- [Bilibili 相关视频 BV198456AEzn](https://www.bilibili.com/video/BV198456AEzn)
-- [Bilibili 作者主页](https://space.bilibili.com/1792463983)
+- [相关项目 BV198456AEzn](https://www.bilibili.com/video/BV198456AEzn)
+- [相关项目作者](https://space.bilibili.com/1792463983)
