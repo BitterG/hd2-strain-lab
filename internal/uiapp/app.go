@@ -111,6 +111,7 @@ func (a *App) AttachWindow(win *mygo.Window) {
 	win.OnClose(func(_ *mygo.CloseEvent) {
 		a.stopProxy()
 	})
+	a.triggerLiveRefresh()
 }
 
 func (a *App) View(c *ui.Context) {
@@ -208,10 +209,14 @@ func (a *App) triggerLiveRefresh() {
 	}
 	a.refreshing = true
 	warID := a.galaxy.WarID
+	upstream := ""
+	if a.settings.UseUpstreamProxy {
+		upstream = a.settings.UpstreamProxyURL
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 		defer cancel()
-		_, statusRaw, _, err := catalog.RefreshFromLiveAPI(ctx, warID)
+		warInfoRaw, statusRaw, _, err := catalog.RefreshFromLiveAPI(ctx, warID, upstream)
 		if a.win == nil {
 			return
 		}
@@ -221,10 +226,10 @@ func (a *App) triggerLiveRefresh() {
 				a.toastMsg = err.Error()
 				return
 			}
-			if applyErr := a.galaxy.ApplyStatusBytes(statusRaw, "官方实时战况 "+time.Now().Format("15:04:05")); applyErr != nil {
+			if applyErr := a.galaxy.ApplyWarData(warInfoRaw, statusRaw, "官方实时战况 "+time.Now().Format("15:04:05")); applyErr != nil {
 				a.toastMsg = applyErr.Error()
 			} else {
-				a.toastMsg = "已更新最新银河战况"
+				a.toastMsg = "已同步最新银河战况"
 			}
 		})
 	}()

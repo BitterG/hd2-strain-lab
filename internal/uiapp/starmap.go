@@ -924,7 +924,11 @@ func (a *App) paintHoverTooltip(p *ui.Painter, r ui.Rect, hp *catalog.Planet, ta
 		sub += " · " + hp.SectorZH + "星区"
 	}
 	p.Text(card.X+10, card.Y+26, sub, 10.5, TextDim)
-	p.Text(card.X+10, card.Y+45, fmt.Sprintf("归属: %s   解放: %.1f%%", catalog.FactionNameZH(hp.Owner), hp.LiberationPct()), 11, TextPrimary)
+	pctLbl := "解放"
+	if hp.IsDefense {
+		pctLbl = "防守"
+	}
+	p.Text(card.X+10, card.Y+45, fmt.Sprintf("归属: %s   %s: %.1f%%", catalog.FactionNameZH(hp.Owner), pctLbl, hp.LiberationPct()), 11, TextPrimary)
 	p.Text(card.X+10, card.Y+63, fmt.Sprintf("在线: %d 人   原版效果: %d 项", hp.Players, len(hp.ActiveEffects)), 11, TextDim)
 
 	barBg := ui.Rect{X: card.X + 10, Y: card.Y + 84, W: card.W - 20, H: 4}

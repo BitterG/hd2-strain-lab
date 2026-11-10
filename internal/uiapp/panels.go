@@ -165,8 +165,13 @@ func (a *App) buildVariantTab(c *ui.Context) {
 				})
 				if owner > 0 {
 					fc := FactionColor(owner)
+					lbl := fmt.Sprintf("%s · %.1f%%", catalog.FactionNameZH(owner), lib)
+					if pl != nil && pl.IsDefense {
+						fc = RedDanger
+						lbl = fmt.Sprintf("防守战 · %.1f%%", lib)
+					}
 					ui.Box(c).Padding(3, 8).Radius(999).Background(fc.Alpha(0.18)).Border(1, fc.Alpha(0.7)).Children(func() {
-						ui.Textf(c, "%s · %.1f%%", catalog.FactionNameZH(owner), lib).FontSize(10.5).TextColor(fc)
+						ui.Text(c, lbl).FontSize(10.5).TextColor(fc)
 					})
 				}
 			})

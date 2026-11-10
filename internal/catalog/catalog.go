@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -65,12 +66,14 @@ type Planet struct {
 	Players       int     `json:"players"`
 	RegenPerSec   float64 `json:"regen_per_sec"`
 	ActiveEffects []int   `json:"active_effects"`
-	HasCampaign   bool    `json:"has_campaign"`
-	CampaignType  int     `json:"campaign_type"`
-	CampaignRace  int     `json:"campaign_race"`
-	CampaignCount int     `json:"campaign_count"`
-	IsDefense     bool    `json:"is_defense"`
-	Waypoints     []int   `json:"waypoints"`
+	HasCampaign    bool    `json:"has_campaign"`
+	CampaignType   int     `json:"campaign_type"`
+	CampaignRace   int     `json:"campaign_race"`
+	CampaignCount  int     `json:"campaign_count"`
+	IsDefense      bool    `json:"is_defense"`
+	EventHealth    float64 `json:"event_health"`
+	EventMaxHealth float64 `json:"event_max_health"`
+	Waypoints      []int   `json:"waypoints"`
 	Hidden        bool    `json:"hidden"`
 	InGloom       bool    `json:"in_gloom"`
 	InTCS         bool    `json:"in_tcs"`
@@ -88,6 +91,16 @@ func (p *Planet) DisplayName() string {
 }
 
 func (p *Planet) LiberationPct() float64 {
+	if p.IsDefense && p.EventMaxHealth > 0 {
+		v := (1.0 - p.EventHealth/p.EventMaxHealth) * 100.0
+		if v < 0 {
+			return 0
+		}
+		if v > 100 {
+			return 100
+		}
+		return v
+	}
 	if p.Owner == FactionHumans {
 		return 100
 	}
@@ -220,10 +233,12 @@ type statusJSON struct {
 		Race        int `json:"race"`
 	} `json:"campaigns"`
 	PlanetEvents []struct {
-		ID          int `json:"id"`
-		PlanetIndex int `json:"planetIndex"`
-		EventType   int `json:"eventType"`
-		Race        int `json:"race"`
+		ID          int     `json:"id"`
+		PlanetIndex int     `json:"planetIndex"`
+		EventType   int     `json:"eventType"`
+		Race        int     `json:"race"`
+		Health      float64 `json:"health"`
+		MaxHealth   float64 `json:"maxHealth"`
 	} `json:"planetEvents"`
 	PlanetActiveEffects []struct {
 		Index            int `json:"index"`
@@ -358,6 +373,30 @@ func buildGalaxyData(warInfoRaw, statusRaw []byte, sourceNote string) (*GalaxyDa
 	return g, nil
 }
 
+// ApplyWarData updates planet metadata from WarInfo (if provided) and live Status.
+func (g *GalaxyData) ApplyWarData(warInfoRaw, statusRaw []byte, sourceNote string) error {
+	if len(warInfoRaw) > 0 {
+		var wi warInfoJSON
+		if err := json.Unmarshal(warInfoRaw, &wi); err == nil && len(wi.PlanetInfos) > 0 {
+			for _, info := range wi.PlanetInfos {
+				if p, ok := g.PlanetsByID[info.Index]; ok {
+					if info.MaxHealth > 0 {
+						p.MaxHealth = info.MaxHealth
+					}
+					if len(info.Waypoints) > 0 {
+						p.Waypoints = append([]int(nil), info.Waypoints...)
+					}
+					if info.Position.X != 0 || info.Position.Y != 0 || info.Index == 0 {
+						p.X = info.Position.X
+						p.Y = info.Position.Y
+					}
+				}
+			}
+		}
+	}
+	return g.ApplyStatusBytes(statusRaw, sourceNote)
+}
+
 // ApplyStatusBytes updates live planet statuses, campaigns, attacks, effects and sectors from raw Status JSON.
 func (g *GalaxyData) ApplyStatusBytes(statusRaw []byte, sourceNote string) error {
 	var st statusJSON
@@ -391,6 +430,8 @@ func (g *GalaxyData) applyStatusStruct(st *statusJSON, sourceNote string) {
 		p.CampaignRace = 0
 		p.CampaignCount = 0
 		p.IsDefense = false
+		p.EventHealth = 0
+		p.EventMaxHealth = 0
 		p.Hidden = false
 		p.InGloom = false
 		p.InTCS = false
@@ -455,6 +496,8 @@ func (g *GalaxyData) applyStatusStruct(st *statusJSON, sourceNote string) {
 		if ev.EventType == 1 {
 			if p, ok := g.PlanetsByID[ev.PlanetIndex]; ok {
 				p.IsDefense = true
+				p.EventHealth = ev.Health
+				p.EventMaxHealth = ev.MaxHealth
 				if p.CampaignRace == 0 {
 					p.CampaignRace = ev.Race
 				}
@@ -535,34 +578,52 @@ func (g *GalaxyData) applyStatusStruct(st *statusJSON, sourceNote string) {
 	g.Sectors, g.SectorsByName = BuildSectors(g.Planets)
 }
 
-// RefreshFromLiveAPI fetches live WarInfo and Status directly from HD2's official API
-// (bypassing any local HTTP_PROXY env vars).
-func RefreshFromLiveAPI(ctx context.Context, warID int) (warInfoRaw, statusRaw, effectsRaw []byte, err error) {
+// RefreshFromLiveAPI fetches live WarInfo and Status from HD2's official API.
+// If upstreamProxyURL is non-empty it routes through that proxy; otherwise it bypasses env proxies.
+func RefreshFromLiveAPI(ctx context.Context, warID int, upstreamProxyURL ...string) (warInfoRaw, statusRaw, effectsRaw []byte, err error) {
 	if warID <= 0 {
 		warID = 801
 	}
-	client := &http.Client{
-		Timeout: 12 * time.Second,
-		Transport: &http.Transport{
-			Proxy: nil, // Bypass system/env proxy so we hit live API directly
-		},
+	transport := &http.Transport{
+		Proxy: nil,
 	}
-	fetch := func(url string) ([]byte, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if len(upstreamProxyURL) > 0 && strings.TrimSpace(upstreamProxyURL[0]) != "" {
+		if pu, pErr := url.Parse(strings.TrimSpace(upstreamProxyURL[0])); pErr == nil && pu.Host != "" {
+			transport.Proxy = http.ProxyURL(pu)
+		}
+	}
+	client := &http.Client{
+		Timeout:   12 * time.Second,
+		Transport: transport,
+	}
+	fetch := func(targetURL string) ([]byte, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
 		if err != nil {
 			return nil, err
 		}
 		req.Header.Set("User-Agent", "HD2-MY-CPV/1.0")
 		req.Header.Set("Accept", "application/json")
+		req.Header.Set("Accept-Language", "en-US")
 		resp, err := client.Do(req)
 		if err != nil {
 			return nil, err
 		}
 		defer resp.Body.Close()
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 16*1024*1024))
 		if resp.StatusCode != http.StatusOK {
+			msg := strings.TrimSpace(string(body))
+			if len(msg) > 120 {
+				msg = msg[:120]
+			}
+			if msg != "" {
+				return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, msg)
+			}
 			return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 		}
-		return io.ReadAll(io.LimitReader(resp.Body, 16*1024*1024))
+		if readErr != nil {
+			return nil, readErr
+		}
+		return body, nil
 	}
 
 	base := fmt.Sprintf("https://api.live.prod.thehelldiversgame.com/api/WarSeason/%d", warID)
