@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    name: Build & Publish Windows Release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run vet and unit tests
+        run: |
+          go vet ./...
+          go test -count=1 -skip TestRefreshFromLiveAPI ./...
+
+      - name: Build Windows executable
+        run: |
+          go build -ldflags="-H windowsgui -s -w" -o hd2-strain-lab.exe .
+          $hash = (Get-FileHash .\hd2-strain-lab.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  hd2-strain-lab.exe" | Out-File -Encoding ascii SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          gh release create "$tag" `
+            --title "HD2 Strain Lab $tag" `
+            --notes-file CHANGELOG.md `
+            .\hd2-strain-lab.exe `
+            .\SHA256SUMS.txt
