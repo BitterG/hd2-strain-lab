@@ -25,6 +25,8 @@ var effectPairs = [][2]int{
 	{1401, 1400},
 	{1402, 1403},
 	{1413, 1414},
+	{1430, 1431},
+	{1434, 1433},
 }
 
 var nativeEnemyEffects = map[int]int{
@@ -280,6 +282,105 @@ func RewriteStatus(raw []byte, plan config.Plan, ctx *RewriteContext) ([]byte, R
 		}
 		entries = keptEntries
 		res["planetActiveEffects"] = entries
+
+		// Also remove disabled native effects applied via globalEvents[].planetIndices
+		if geList, okGE := asSlice(res["globalEvents"]); okGE {
+			for _, geRaw := range geList {
+				ge, okM := asMap(geRaw)
+				if !okM {
+					continue
+				}
+				rawEffs, okE := asSlice(ge["effectIds"])
+				rawPlanetsGE, okP := asSlice(ge["planetIndices"])
+				if !okE || !okP || len(rawEffs) == 0 {
+					continue
+				}
+				geEffs := make([]int, 0, len(rawEffs))
+				for _, r := range rawEffs {
+					if id, ok := asInt(r); ok {
+						geEffs = append(geEffs, id)
+					}
+				}
+				if len(geEffs) == 0 {
+					continue
+				}
+				if len(rawPlanetsGE) > 0 {
+					keptPlanets := make([]any, 0, len(rawPlanetsGE))
+					changedGE := false
+					for _, rp := range rawPlanetsGE {
+						pid, okID := asInt(rp)
+						if !okID {
+							keptPlanets = append(keptPlanets, rp)
+							continue
+						}
+						anyDisabled := false
+						for _, eid := range geEffs {
+							if disabledPairs[pairKey{pid, eid}] {
+								anyDisabled = true
+								break
+							}
+						}
+						if anyDisabled {
+							changedGE = true
+							summary.EffectsRemoved++
+							summary.ChangedCount++
+							// Preserve any non-disabled effect from the same globalEvent via planetActiveEffects
+							for _, eid := range geEffs {
+								k := pairKey{pid, eid}
+								if !disabledPairs[k] && !existingPairs[k] {
+									existingPairs[k] = true
+									entries = append(entries, map[string]any{
+										"index":            pid,
+										"galacticEffectId": eid,
+									})
+								}
+							}
+							continue
+						}
+						keptPlanets = append(keptPlanets, rp)
+					}
+					if changedGE {
+						ge["planetIndices"] = keptPlanets
+						res["planetActiveEffects"] = entries
+					}
+				} else {
+					// Galaxy-wide globalEvent (empty planetIndices): if any target disables an effect in it,
+					// materialize planetIndices as all other known planets.
+					disabledPlanetsForGE := make(map[int]bool)
+					for _, t := range activeTargets {
+						for _, eid := range geEffs {
+							if disabledPairs[pairKey{t.Planet, eid}] {
+								disabledPlanetsForGE[t.Planet] = true
+								break
+							}
+						}
+					}
+					if len(disabledPlanetsForGE) > 0 {
+						expanded := make([]any, 0, len(knownPlanets))
+						for pid := range knownPlanets {
+							if disabledPlanetsForGE[pid] {
+								summary.EffectsRemoved++
+								summary.ChangedCount++
+								for _, eid := range geEffs {
+									k := pairKey{pid, eid}
+									if !disabledPairs[k] && !existingPairs[k] {
+										existingPairs[k] = true
+										entries = append(entries, map[string]any{
+											"index":            pid,
+											"galacticEffectId": eid,
+										})
+									}
+								}
+								continue
+							}
+							expanded = append(expanded, pid)
+						}
+						ge["planetIndices"] = expanded
+						res["planetActiveEffects"] = entries
+					}
+				}
+			}
+		}
 	}
 
 	// Add effects

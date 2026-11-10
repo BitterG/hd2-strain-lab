@@ -244,6 +244,11 @@ type statusJSON struct {
 		Index            int `json:"index"`
 		GalacticEffectID int `json:"galacticEffectId"`
 	} `json:"planetActiveEffects"`
+	GlobalEvents []struct {
+		EventID       int   `json:"eventId"`
+		EffectIDs     []int `json:"effectIds"`
+		PlanetIndices []int `json:"planetIndices"`
+	} `json:"globalEvents"`
 }
 
 // LoadEmbedded builds the complete initial GalaxyData from bundled offline assets.
@@ -458,19 +463,32 @@ func (g *GalaxyData) applyStatusStruct(st *statusJSON, sourceNote string) {
 		}
 	}
 
-	for _, ae := range st.PlanetActiveEffects {
-		if p, ok := g.PlanetsByID[ae.Index]; ok {
-			if !slices.Contains(p.ActiveEffects, ae.GalacticEffectID) {
-				p.ActiveEffects = append(p.ActiveEffects, ae.GalacticEffectID)
+	addPlanetEffect := func(pid, eid int) {
+		if p, ok := g.PlanetsByID[pid]; ok {
+			if !slices.Contains(p.ActiveEffects, eid) {
+				p.ActiveEffects = append(p.ActiveEffects, eid)
 			}
-			if ae.GalacticEffectID == 1188 || ae.GalacticEffectID == 1193 {
+			if eid == 1188 || eid == 1193 {
 				p.InGloom = true
 			}
-			if ae.GalacticEffectID == 1395 {
+			if eid == 1395 {
 				p.InTCS = true
 			}
-			if ae.GalacticEffectID == 1190 {
+			if eid == 1190 {
 				p.Hidden = true
+			}
+		}
+	}
+	for _, ae := range st.PlanetActiveEffects {
+		addPlanetEffect(ae.Index, ae.GalacticEffectID)
+	}
+	for _, ge := range st.GlobalEvents {
+		if len(ge.PlanetIndices) == 0 || len(ge.EffectIDs) == 0 {
+			continue
+		}
+		for _, pid := range ge.PlanetIndices {
+			for _, eid := range ge.EffectIDs {
+				addPlanetEffect(pid, eid)
 			}
 		}
 	}

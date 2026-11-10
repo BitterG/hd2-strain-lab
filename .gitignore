@@ -1,4 +1,5 @@
 *.exe
+*.exe~
 *.tmp
 *.log
 profile/

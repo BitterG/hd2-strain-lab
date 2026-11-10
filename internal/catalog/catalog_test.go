@@ -56,6 +56,27 @@ func TestApplyWarDataAndDefenseProgress(t *testing.T) {
 	}
 }
 
+func TestGlobalEventsMergedIntoPlanetActiveEffects(t *testing.T) {
+	g, err := LoadEmbedded()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := []byte(`{
+		"warId": 801,
+		"time": 86383570,
+		"planetStatus": [{"index": 124, "owner": 2, "health": 1000000, "players": 100, "position": {"x": 0.32, "y": 0.41}}],
+		"planetActiveEffects": [{"index": 124, "galacticEffectId": 1430}, {"index": 124, "galacticEffectId": 1431}],
+		"globalEvents": [{"eventId": 1501111, "effectIds": [1400, 1401], "planetIndices": [124]}]
+	}`)
+	if err := g.ApplyStatusBytes(st, "test"); err != nil {
+		t.Fatal(err)
+	}
+	p := g.PlanetsByID[124]
+	if len(p.ActiveEffects) != 4 {
+		t.Fatalf("expected 4 active effects [1400 1401 1430 1431], got %v", p.ActiveEffects)
+	}
+}
+
 func TestRefreshFromLiveAPI(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
