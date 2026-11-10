@@ -26,3 +26,13 @@
 .\dev.ps1     # 开发运行
 .\build.ps1   # 构建单文件 hd2-strain-lab.exe
 ```
+
+## 参考与致谢
+
+- [custom-planets-variants](https://github.com/127MU/custom-planets-variants)
+- [Helldivers Wiki (Illuminate)](https://helldivers.wiki.gg/wiki/Illuminate)
+- [Helldivers Wiki](https://helldivers.wiki.gg)
+- [HD2 中文维基 / 银河地图参考](https://jerry114514.github.io/HD2_Wiki/wiki.html)
+- [egoist/mygo](https://github.com/egoist/mygo)
+- [Bilibili 相关视频 BV198456AEzn](https://www.bilibili.com/video/BV198456AEzn)
+- [Bilibili 作者主页](https://space.bilibili.com/1792463983)
