@@ -39,16 +39,17 @@ func FactionNameZH(f int) string {
 }
 
 type Effect struct {
-	ID          int      `json:"id"`
-	EffectType  int      `json:"effectType"`
-	Name        string   `json:"name"`
-	EnglishName string   `json:"englishName"`
-	Native      string   `json:"native"`
-	GroupKey    string   `json:"groupKey"`
-	GroupLabel  string   `json:"groupLabel"`
-	Aliases     []string `json:"aliases"`
-	RefNote     string   `json:"reference_note"`
-	Experimental bool    `json:"experimental"`
+	ID           int      `json:"id"`
+	EffectType   int      `json:"effectType"`
+	Name         string   `json:"name"`
+	EnglishName  string   `json:"englishName"`
+	Native       string   `json:"native"`
+	Description  string   `json:"description"`
+	GroupKey     string   `json:"groupKey"`
+	GroupLabel   string   `json:"groupLabel"`
+	Aliases      []string `json:"aliases"`
+	RefNote      string   `json:"reference_note"`
+	Experimental bool     `json:"experimental"`
 }
 
 type Planet struct {

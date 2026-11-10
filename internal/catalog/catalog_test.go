@@ -105,6 +105,50 @@ func TestSpaceStationsMergedIntoPlanetActiveEffects(t *testing.T) {
 	}
 }
 
+func TestWikiTranslationsPresent(t *testing.T) {
+	g, err := LoadEmbedded()
+	if err != nil {
+		t.Fatal(err)
+	}
+	checks := map[int]string{
+		1177: "黑洞",
+		1304: "阿尔法前哨站",
+		1331: "唯一真旗",
+		1349: "护卫犬",
+		1351: "便携式地狱火炸弹",
+		1390: "破门锤",
+		1404: "利维坦封锁屏障",
+		1406: "寂域侧边星图区域",
+		1423: "漩涡重型坦克",
+		1430: "超级地球武装部队重兵驻守",
+		1431: "腐蚀变种",
+		1432: "毒瘴变种",
+		1433: "毒瘴变种",
+	}
+	for id, substr := range checks {
+		eff, ok := g.EffectsByID[id]
+		if !ok {
+			t.Fatalf("missing effect #%d", id)
+		}
+		if !containsSubstring(eff.Name, substr) {
+			t.Fatalf("effect #%d expected to contain %q, got %q", id, substr, eff.Name)
+		}
+	}
+}
+
+func containsSubstring(s, sub string) bool {
+	return len(sub) == 0 || (len(s) >= len(sub) && indexString(s, sub) >= 0)
+}
+
+func indexString(s, sub string) int {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
+}
+
 func TestRefreshFromLiveAPI(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()

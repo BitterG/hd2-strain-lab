@@ -548,6 +548,7 @@ func (a *App) filteredEffects() []catalog.Effect {
 			idStr := strconv.Itoa(eff.ID)
 			matched := strings.Contains(strings.ToLower(eff.Name), q) ||
 				strings.Contains(strings.ToLower(eff.EnglishName), q) ||
+				strings.Contains(strings.ToLower(eff.Description), q) ||
 				strings.Contains(strings.ToLower(eff.Native), q) ||
 				strings.Contains(idStr, q)
 			if !matched {
