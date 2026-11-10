@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"hd2-mygo-cpv/assets"
+	"hd2-strain-lab/assets"
 )
 
 const (
@@ -636,7 +636,7 @@ func RefreshFromLiveAPI(ctx context.Context, warID int, upstreamProxyURL ...stri
 		if err != nil {
 			return nil, err
 		}
-		req.Header.Set("User-Agent", "HD2-MY-CPV/1.0")
+		req.Header.Set("User-Agent", "HD2-Strain-Lab/1.0")
 		req.Header.Set("Accept", "application/json")
 		req.Header.Set("Accept-Language", "en-US")
 		resp, err := client.Do(req)

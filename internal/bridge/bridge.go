@@ -10,7 +10,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"hd2-mygo-cpv/internal/config"
+	"hd2-strain-lab/internal/config"
 )
 
 const stillActive = 259

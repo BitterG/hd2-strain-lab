@@ -7,7 +7,7 @@ import (
 	"math"
 	"strconv"
 
-	"hd2-mygo-cpv/internal/config"
+	"hd2-strain-lab/internal/config"
 )
 
 // Verified type40 tag / type71 presence pairs (War 801).

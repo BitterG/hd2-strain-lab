@@ -1,4 +1,4 @@
-module hd2-mygo-cpv
+module hd2-strain-lab
 
 go 1.27.3
 

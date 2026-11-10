@@ -120,8 +120,8 @@ func (m *Manager) GenerateCA() error {
 	tmpl := &x509.Certificate{
 		SerialNumber: serial,
 		Subject: pkix.Name{
-			CommonName:   "HD2-MY-CPV Local CA",
-			Organization: []string{"HD2 Custom Planets & Variants"},
+			CommonName:   "HD2 Strain Lab Local CA",
+			Organization: []string{"HD2 Strain Lab"},
 		},
 		NotBefore:             now,
 		NotAfter:              now.AddDate(5, 0, 0),

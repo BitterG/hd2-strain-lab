@@ -17,7 +17,7 @@ func TestUIViewSelectPlanetAndDispatch(t *testing.T) {
 	defer app.stopProxy()
 
 	tt := ui.NewTester(app.View, 1380, 860)
-	if !tt.HasText("绝地潜兵 2 · 自定义星球变种指挥台") {
+	if !tt.HasText("HD2 Strain Lab · 星球变种工坊") {
 		t.Fatalf("expected header title, got texts: %v", tt.Texts())
 	}
 

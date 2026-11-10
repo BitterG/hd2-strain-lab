@@ -18,9 +18,9 @@ import (
 	"testing"
 	"time"
 
-	"hd2-mygo-cpv/assets"
-	"hd2-mygo-cpv/internal/certs"
-	"hd2-mygo-cpv/internal/config"
+	"hd2-strain-lab/assets"
+	"hd2-strain-lab/internal/certs"
+	"hd2-strain-lab/internal/config"
 )
 
 func makeUpstreamTestCert(t *testing.T) (tls.Certificate, *x509.CertPool) {

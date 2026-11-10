@@ -2,7 +2,7 @@ package uiapp
 
 import (
 	"github.com/egoist/mygo/ui"
-	"hd2-mygo-cpv/internal/catalog"
+	"hd2-strain-lab/internal/catalog"
 )
 
 var (

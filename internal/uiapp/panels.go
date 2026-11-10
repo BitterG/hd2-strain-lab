@@ -9,9 +9,9 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
-	"hd2-mygo-cpv/internal/bridge"
-	"hd2-mygo-cpv/internal/catalog"
-	"hd2-mygo-cpv/internal/config"
+	"hd2-strain-lab/internal/bridge"
+	"hd2-strain-lab/internal/catalog"
+	"hd2-strain-lab/internal/config"
 )
 
 var (

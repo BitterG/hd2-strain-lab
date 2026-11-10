@@ -77,13 +77,16 @@ func DefaultSettings() Settings {
 	}
 }
 
-// ProfileDir returns the persistent profile directory (%LOCALAPPDATA%\HD2-MY-CPV or override).
+// ProfileDir returns the persistent profile directory (%APPDATA%\HD2-Strain-Lab or override),
+// automatically migrating files from legacy %APPDATA%\HD2-MY-CPV on first launch.
 func ProfileDir() (string, error) {
-	if env := strings.TrimSpace(os.Getenv("HD2_MY_CPV_PROFILE")); env != "" {
-		if err := os.MkdirAll(env, 0o755); err != nil {
-			return "", err
+	for _, key := range []string{"HD2_STRAIN_LAB_PROFILE", "HD2_MY_CPV_PROFILE"} {
+		if env := strings.TrimSpace(os.Getenv(key)); env != "" {
+			if err := os.MkdirAll(env, 0o755); err != nil {
+				return "", err
+			}
+			return env, nil
 		}
-		return env, nil
 	}
 	base, err := os.UserConfigDir()
 	if err != nil {
@@ -93,7 +96,23 @@ func ProfileDir() (string, error) {
 		}
 		base = filepath.Dir(exe)
 	}
-	dir := filepath.Join(base, "HD2-MY-CPV")
+	dir := filepath.Join(base, "HD2-Strain-Lab")
+	if _, statErr := os.Stat(dir); os.IsNotExist(statErr) {
+		legacyDir := filepath.Join(base, "HD2-MY-CPV")
+		if entries, readErr := os.ReadDir(legacyDir); readErr == nil {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return "", err
+			}
+			for _, ent := range entries {
+				if ent.IsDir() {
+					continue
+				}
+				if raw, rErr := os.ReadFile(filepath.Join(legacyDir, ent.Name())); rErr == nil {
+					_ = os.WriteFile(filepath.Join(dir, ent.Name()), raw, 0o600)
+				}
+			}
+		}
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}

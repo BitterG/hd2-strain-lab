@@ -1,4 +1,4 @@
-# 绝地潜兵 2 · 自定义星球变种指挥台 (MyGo GPU)
+# HD2 Strain Lab · 绝地潜兵 2 星球变种工坊 (MyGo GPU)
 
 基于 [egoist/mygo](https://github.com/egoist/mygo) 原生 GPU 渲染框架（`package ui`，纯 Go 无 WebView/无 Python 依赖）开发的《绝地潜兵 2》星球变种与代理下发桌面工具。
 
@@ -24,5 +24,5 @@
 
 ```powershell
 .\dev.ps1     # 开发运行
-.\build.ps1   # 构建单文件 hd2-mygo-cpv.exe
+.\build.ps1   # 构建单文件 hd2-strain-lab.exe
 ```

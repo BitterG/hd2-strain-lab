@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
-	"hd2-mygo-cpv/internal/catalog"
-	"hd2-mygo-cpv/internal/config"
+	"hd2-strain-lab/internal/catalog"
+	"hd2-strain-lab/internal/config"
 )
 
 type mapCacheKey struct {

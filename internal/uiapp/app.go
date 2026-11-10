@@ -12,10 +12,10 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
-	"hd2-mygo-cpv/internal/catalog"
-	"hd2-mygo-cpv/internal/certs"
-	"hd2-mygo-cpv/internal/config"
-	"hd2-mygo-cpv/internal/proxy"
+	"hd2-strain-lab/internal/catalog"
+	"hd2-strain-lab/internal/certs"
+	"hd2-strain-lab/internal/config"
+	"hd2-strain-lab/internal/proxy"
 )
 
 type App struct {
@@ -146,7 +146,7 @@ func (a *App) buildHeader(c *ui.Context) {
 
 	ui.Row(c).FillWidth().Height(48).Padding(0, 14).Gap(10).AlignItems(ui.Center).
 		Background(BgMid).BorderWidth(0, 0, 1, 0).BorderColor(BorderSub).Children(func() {
-		ui.Text(c, "绝地潜兵 2 · 自定义星球变种指挥台").FontSize(15).Bold().TextColor(HD2Gold)
+		ui.Text(c, "HD2 Strain Lab · 星球变种工坊").FontSize(15).Bold().TextColor(HD2Gold)
 
 		ui.Box(c).Padding(2, 8).Radius(999).Background(BlueAccent.Alpha(0.2)).Border(1, BlueAccent.Alpha(0.6)).Children(func() {
 			ui.Text(c, "MYGO GPU").FontSize(10).Bold().TextColor(ui.Hex("#93C5FD"))
