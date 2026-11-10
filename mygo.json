@@ -1,0 +1,8 @@
+{
+  "name": "绝地潜兵 2 · 自定义星球变种指挥台",
+  "slug": "hd2-mygo-cpv",
+  "identifier": "io.github.hd2mycpv.app",
+  "version": "1.0.0",
+  "icon": "resources/icon.png",
+  "main": "."
+}

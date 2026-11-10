@@ -16,3 +16,6 @@ var StarmapJSON []byte
 
 //go:embed waypoints.json
 var WaypointsJSON []byte
+
+//go:embed app_icon.png
+var AppIconPNG []byte

@@ -6,6 +6,7 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"hd2-mygo-cpv/assets"
 	"hd2-mygo-cpv/internal/bridge"
 	"hd2-mygo-cpv/internal/uiapp"
 )
@@ -31,6 +32,7 @@ func main() {
 			MinHeight: 680,
 			Content:   ui.View(app.View),
 		})
+		_ = win.SetIcon(assets.AppIconPNG)
 		app.AttachWindow(win)
 	})
 
