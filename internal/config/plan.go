@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -62,10 +63,25 @@ type Plan struct {
 
 // Settings stores non-sensitive local application preferences.
 type Settings struct {
-	UseUpstreamProxy bool   `json:"use_upstream_proxy"`
-	UpstreamProxyURL string `json:"upstream_proxy_url"` // e.g. http://127.0.0.1:7890
-	BindPort         int    `json:"bind_port"`          // 0 = ephemeral loopback port
-	AllowAllEffects  bool   `json:"allow_all_effects"`  // Allow dispatching catalog effects even before live /GalacticWarEffects is seen (useful for offline/experimental)
+	UseUpstreamProxy bool    `json:"use_upstream_proxy"`
+	UpstreamProxyURL string  `json:"upstream_proxy_url"` // e.g. http://127.0.0.1:7890
+	BindPort         int     `json:"bind_port"`          // 0 = ephemeral loopback port
+	AllowAllEffects  bool    `json:"allow_all_effects"`  // Allow dispatching catalog effects even before live /GalacticWarEffects is seen (useful for offline/experimental)
+	FontScale        float64 `json:"font_scale,omitempty"`
+}
+
+// NormalizeFontScale clamps a UI font scale factor to [0.80, 1.50], defaulting <= 0 to 1.0.
+func NormalizeFontScale(v float64) float64 {
+	if math.IsNaN(v) || math.IsInf(v, 0) || v <= 0 {
+		return 1.0
+	}
+	if v < 0.80 {
+		v = 0.80
+	}
+	if v > 1.50 {
+		v = 1.50
+	}
+	return math.Round(v*100) / 100
 }
 
 func DefaultSettings() Settings {
@@ -74,6 +90,7 @@ func DefaultSettings() Settings {
 		UpstreamProxyURL: "",
 		BindPort:         0,
 		AllowAllEffects:  false,
+		FontScale:        1.0,
 	}
 }
 
@@ -282,6 +299,7 @@ func LoadSettings(profileDir string) (Settings, error) {
 	if err := json.Unmarshal(b, &s); err != nil {
 		return DefaultSettings(), err
 	}
+	s.FontScale = NormalizeFontScale(s.FontScale)
 	return s, nil
 }
 

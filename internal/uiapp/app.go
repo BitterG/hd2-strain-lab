@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"slices"
 	"strconv"
@@ -75,6 +76,7 @@ func NewApp() (*App, error) {
 		plan = config.Plan{Schema: 2, Targets: []config.PlanetTarget{}}
 	}
 	settings, _ := config.LoadSettings(profileDir)
+	settings.FontScale = config.NormalizeFontScale(settings.FontScale)
 	cm, err := certs.NewManager(profileDir)
 	if err != nil {
 		return nil, err
@@ -90,6 +92,7 @@ func NewApp() (*App, error) {
 		starMap:     NewStarMapState(),
 		effectGroup: "全部",
 	}
+	app.theme.FontSize = app.fs(13)
 
 	app.proxySrv = proxy.NewServer(cm, plan, settings, func() {
 		if app.win != nil {
@@ -117,7 +120,38 @@ func (a *App) AttachWindow(win *mygo.Window) {
 	a.triggerLiveRefresh()
 }
 
+func (a *App) fontScale() float32 {
+	return float32(config.NormalizeFontScale(a.settings.FontScale))
+}
+
+func (a *App) fs(base float32) float32 {
+	return float32(math.Round(float64(base)*float64(a.fontScale())*2.0) / 2.0)
+}
+
+func (a *App) panelScale(minScale, maxScale float32) float32 {
+	s := a.fontScale()
+	if s < minScale {
+		return minScale
+	}
+	if s > maxScale {
+		return maxScale
+	}
+	return s
+}
+
+func (a *App) setFontScale(next float64) {
+	norm := config.NormalizeFontScale(next)
+	a.settings.FontScale = norm
+	a.theme.FontSize = a.fs(13)
+	if a.starMap != nil {
+		clear(a.starMap.labelSizes)
+	}
+	_ = config.SaveSettings(a.profileDir, a.settings)
+	a.proxySrv.UpdateSettings(a.settings)
+}
+
 func (a *App) View(c *ui.Context) {
+	a.theme.FontSize = a.fs(13)
 	c.SetTheme(a.theme)
 	if a.toastMsg != "" {
 		c.Toast(a.toastMsg)
@@ -147,26 +181,39 @@ func (a *App) buildHeader(c *ui.Context) {
 		}
 	}
 
-	ui.Row(c).FillWidth().Height(48).Padding(0, 14).Gap(10).AlignItems(ui.Center).
+	ui.Row(c).FillWidth().Height(48*a.panelScale(1.0, 1.25)).Padding(0, 14).Gap(10).AlignItems(ui.Center).
 		Background(BgMid).BorderWidth(0, 0, 1, 0).BorderColor(BorderSub).Children(func() {
-		ui.Text(c, "HD2 Strain Lab · 星球变种工坊").FontSize(15).Bold().TextColor(HD2Gold)
+		ui.Text(c, "HD2 Strain Lab · 星球变种工坊").FontSize(a.fs(15)).Bold().TextColor(HD2Gold)
 
 		ui.Box(c).Padding(2, 8).Radius(999).Background(BlueAccent.Alpha(0.2)).Border(1, BlueAccent.Alpha(0.6)).Children(func() {
-			ui.Text(c, "MYGO GPU").FontSize(10).Bold().TextColor(ui.Hex("#93C5FD"))
+			ui.Text(c, "MYGO GPU").FontSize(a.fs(10)).Bold().TextColor(ui.Hex("#93C5FD"))
 		})
 
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-			ui.Textf(c, "星球 %d", len(a.galaxy.Planets)).FontSize(11.5).TextColor(TextDim)
-			ui.Textf(c, "超地 %d", counts[catalog.FactionHumans]).FontSize(11.5).TextColor(ColorHumans)
-			ui.Textf(c, "虫族 %d", counts[catalog.FactionTerminids]).FontSize(11.5).TextColor(ColorTerminids)
-			ui.Textf(c, "机器人 %d", counts[catalog.FactionAutomatons]).FontSize(11.5).TextColor(ColorAutomatons)
-			ui.Textf(c, "光能 %d", counts[catalog.FactionIlluminate]).FontSize(11.5).TextColor(ColorIlluminate)
-			ui.Textf(c, "已配置 %d", enabledCount).FontSize(11.5).Bold().TextColor(CyanActive)
+			ui.Textf(c, "星球 %d", len(a.galaxy.Planets)).FontSize(a.fs(11.5)).TextColor(TextDim)
+			ui.Textf(c, "超地 %d", counts[catalog.FactionHumans]).FontSize(a.fs(11.5)).TextColor(ColorHumans)
+			ui.Textf(c, "虫族 %d", counts[catalog.FactionTerminids]).FontSize(a.fs(11.5)).TextColor(ColorTerminids)
+			ui.Textf(c, "机器人 %d", counts[catalog.FactionAutomatons]).FontSize(a.fs(11.5)).TextColor(ColorAutomatons)
+			ui.Textf(c, "光能 %d", counts[catalog.FactionIlluminate]).FontSize(a.fs(11.5)).TextColor(ColorIlluminate)
+			ui.Textf(c, "已配置 %d", enabledCount).FontSize(a.fs(11.5)).Bold().TextColor(CyanActive)
 		})
 
 		ui.Spacer(c)
 
-		ui.Text(c, a.galaxy.LiveSourceNote).FontSize(11).TextColor(TextMute)
+		ui.Text(c, a.galaxy.LiveSourceNote).FontSize(a.fs(11)).TextColor(TextMute)
+
+		ui.Row(c).Gap(3).AlignItems(ui.Center).Children(func() {
+			if ui.Button(c.Key("hdr-fs-down"), "A-").Disabled(a.settings.FontScale <= 0.801).Clicked() {
+				a.setFontScale(float64(a.fontScale()) - 0.05)
+			}
+			pct := int(math.Round(float64(a.fontScale()) * 100))
+			if ui.Button(c.Key("hdr-fs-rst"), fmt.Sprintf("%d%%", pct)).Clicked() {
+				a.setFontScale(1.0)
+			}
+			if ui.Button(c.Key("hdr-fs-up"), "A+").Disabled(a.settings.FontScale >= 1.499).Clicked() {
+				a.setFontScale(float64(a.fontScale()) + 0.05)
+			}
+		})
 
 		refreshLbl := "刷新实时战况"
 		if a.refreshing {

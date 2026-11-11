@@ -22,6 +22,7 @@ type mapCacheKey struct {
 	showFog     bool
 	hoverSector string
 	dataTime    int64
+	fontScale   float32
 }
 
 type StarMapState struct {
@@ -277,7 +278,7 @@ func segIntersectsRect(ax, ay, bx, by, xMin, yMin, xMax, yMax float32) bool {
 	return true
 }
 
-func (m *StarMapState) renderMapLayer(p *ui.Painter, w, h int, g *catalog.GalaxyData, hoveredSector *catalog.SectorInfo) {
+func (m *StarMapState) renderMapLayer(p *ui.Painter, w, h int, g *catalog.GalaxyData, hoveredSector *catalog.SectorInfo, fontScale float32) {
 	m.ensureStarCanvas(p, w, h)
 	hoverName := ""
 	if hoveredSector != nil {
@@ -288,6 +289,7 @@ func (m *StarMapState) renderMapLayer(p *ui.Painter, w, h int, g *catalog.Galaxy
 		camX: m.CamX, camY: m.CamY, zoom: m.Zoom,
 		tilt3D: m.Tilt3D, showSector: m.ShowSector, showSupply: m.ShowSupply, showFog: m.ShowFog,
 		hoverSector: hoverName, dataTime: g.LastUpdatedAt.UnixNano(),
+		fontScale: fontScale,
 	}
 	if m.layerCanvas == nil || m.layerKey.w != w || m.layerKey.h != h {
 		m.layerCanvas = ui.NewCanvas(w, h)
@@ -529,7 +531,7 @@ func (m *StarMapState) renderMapLayer(p *ui.Painter, w, h int, g *catalog.Galaxy
 			if sx < -60 || sx > lr.W+60 || sy < -30 || sy > lr.H+30 {
 				continue
 			}
-			cp.Text(sx-24, sy-10, catalog.FactionNameZH(fac), 15, FactionColor(fac).Alpha(0.36))
+			cp.Text(sx-24*fontScale, sy-10*fontScale, catalog.FactionNameZH(fac), 15*fontScale, FactionColor(fac).Alpha(0.36))
 		}
 	})
 }
@@ -675,7 +677,7 @@ func (a *App) buildStarMap(c *ui.Context) {
 			}
 
 			// Blit cached background + sectors + supply lines + fog layer
-			m.renderMapLayer(p, w, h, g, hoveredSector)
+			m.renderMapLayer(p, w, h, g, hoveredSector, a.fontScale())
 			if m.layerCanvas != nil {
 				p.Image(m.layerCanvas.Bitmap(), r, ui.FillBox)
 			}
@@ -764,10 +766,10 @@ func (a *App) buildStarMap(c *ui.Context) {
 
 				if m.ShowLabels && (isSelected || isHovered || hasTarget || special || m.Zoom >= 1.85 || (pl.Players >= 2000 && m.Zoom >= 1.15)) {
 					lbl := pl.DisplayName()
-					fontSize := float32(10.5)
+					fontSize := a.fs(10.5)
 					lblCol := TextPrimary
 					if isSelected {
-						fontSize = 11.5
+						fontSize = a.fs(11.5)
 						lblCol = CyanBright
 					} else if hasTarget {
 						lblCol = CyanActive
@@ -804,7 +806,7 @@ func (a *App) buildStarMap(c *ui.Context) {
 		if m.PickingSource {
 			ui.Row(c).Absolute().Top(12).Left(260).Padding(8, 14).Gap(10).Radius(999).
 				Background(ui.RGBA(239, 68, 68, 0.92)).Border(1, ui.Hex("#FCA5A5")).Children(func() {
-				ui.Text(c, "请在星图上点击一颗敌方星球作为进攻来源").FontSize(12).Bold().TextColor(ui.Hex("#FFFFFF"))
+				ui.Text(c, "请在星图上点击一颗敌方星球作为进攻来源").FontSize(a.fs(12)).Bold().TextColor(ui.Hex("#FFFFFF"))
 				if ui.Button(c, "取消").Clicked() {
 					m.PickingSource = false
 				}
@@ -816,7 +818,7 @@ func (a *App) buildStarMap(c *ui.Context) {
 			}
 			ui.Row(c).Absolute().Top(12).Left(260).Padding(8, 14).Gap(10).Radius(999).
 				Background(ui.RGBA(14, 116, 144, 0.94)).Border(1, CyanBright).Children(func() {
-				ui.Textf(c, "拷贝 [%s] 的 %d 项效果 → 请点击目标星球", srcName, len(a.copyEffectIDs)).FontSize(12).Bold().TextColor(ui.Hex("#FFFFFF"))
+				ui.Textf(c, "拷贝 [%s] 的 %d 项效果 → 请点击目标星球", srcName, len(a.copyEffectIDs)).FontSize(a.fs(12)).Bold().TextColor(ui.Hex("#FFFFFF"))
 				if ui.Button(c.Key("cancel-copy"), "取消").Clicked() {
 					m.PickingCopyTarget = false
 					a.copyEffectIDs = nil
@@ -861,12 +863,12 @@ func (a *App) buildStarMap(c *ui.Context) {
 		// Bottom-left Legend & Hint bar
 		ui.Row(c).Absolute().Bottom(12).Left(12).Gap(12).Padding(6, 12).Radius(8).
 			Background(ui.RGBA(10, 14, 24, 0.84)).Border(1, BorderSub).Children(func() {
-			legendDot(c, ColorHumans, "超级地球")
-			legendDot(c, ColorTerminids, "终结族")
-			legendDot(c, ColorAutomatons, "机器人")
-			legendDot(c, ColorIlluminate, "光能者")
-			legendDot(c, CyanActive, "已配置变种")
-			ui.Text(c, "｜ 滚轮缩放 · 拖动平移 · 单击选球 · Ctrl多选 · 双击聚焦").FontSize(11).TextColor(TextMute)
+			a.legendDot(c, ColorHumans, "超级地球")
+			a.legendDot(c, ColorTerminids, "终结族")
+			a.legendDot(c, ColorAutomatons, "机器人")
+			a.legendDot(c, ColorIlluminate, "光能者")
+			a.legendDot(c, CyanActive, "已配置变种")
+			ui.Text(c, "｜ 滚轮缩放 · 拖动平移 · 单击选球 · Ctrl多选 · 双击聚焦").FontSize(a.fs(11)).TextColor(TextMute)
 		})
 	})
 }
@@ -878,25 +880,25 @@ func toggleLabel(name string, on bool) string {
 	return name
 }
 
-func legendDot(c *ui.Context, col ui.Color, label string) {
+func (a *App) legendDot(c *ui.Context, col ui.Color, label string) {
 	ui.Row(c).Gap(5).AlignItems(ui.Center).Children(func() {
 		ui.Box(c).Size(8, 8).Radius(4).Background(col)
-		ui.Text(c, label).FontSize(11).TextColor(TextDim)
+		ui.Text(c, label).FontSize(a.fs(11)).TextColor(TextDim)
 	})
 }
 
 func (a *App) buildSectorCard(c *ui.Context, sec *catalog.SectorInfo) {
 	domCol := FactionColor(sec.Dominant)
-	ui.Column(c).Absolute().Top(12).Left(12).Width(228).Padding(10, 12).Gap(5).Radius(10).
+	ui.Column(c).Absolute().Top(12).Left(12).Width(228*a.panelScale(1.0, 1.28)).Padding(10, 12).Gap(5).Radius(10).
 		Background(ui.RGBA(10, 14, 26, 0.90)).Border(1, ui.Hex("#334155")).Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Gap(6).Children(func() {
 			ui.Box(c).Size(10, 10).Radius(5).Background(domCol)
-			ui.Text(c, sec.Name+"星区").FontSize(14).Bold().TextColor(TextPrimary).Grow(1)
-			ui.Textf(c, "%d 星", sec.PlanetCount).FontSize(11).TextColor(TextMute)
+			ui.Text(c, sec.Name+"星区").FontSize(a.fs(14)).Bold().TextColor(TextPrimary).Grow(1)
+			ui.Textf(c, "%d 星", sec.PlanetCount).FontSize(a.fs(11)).TextColor(TextMute)
 		})
 		ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
-			ui.Text(c, "星区解放度").FontSize(11).TextColor(TextDim)
-			ui.Textf(c, "%.1f%%", sec.LibPct).FontSize(12).Bold().TextColor(TextPrimary)
+			ui.Text(c, "星区解放度").FontSize(a.fs(11)).TextColor(TextDim)
+			ui.Textf(c, "%.1f%%", sec.LibPct).FontSize(a.fs(12)).Bold().TextColor(TextPrimary)
 		})
 		ui.Box(c).FillWidth().Height(4).Radius(2).Background(ui.RGBA(239, 68, 68, 0.55)).Clip().Children(func() {
 			pct := float32(sec.LibPct)
@@ -915,41 +917,44 @@ func (a *App) buildSectorCard(c *ui.Context, sec *catalog.SectorInfo) {
 					ui.Row(c).Gap(4).Padding(2, 7).Radius(999).
 						Background(rc.Alpha(0.16)).Border(1, rc.Alpha(0.7)).Children(func() {
 						ui.Box(c).Size(6, 6).Radius(3).Background(rc)
-						ui.Text(c, catalog.FactionNameZH(r)).FontSize(10).TextColor(rc)
+						ui.Text(c, catalog.FactionNameZH(r)).FontSize(a.fs(10)).TextColor(rc)
 					})
 				}
 			})
 		} else {
-			ui.Text(c, "超级地球完全控制").FontSize(11).TextColor(ColorHumans)
+			ui.Text(c, "超级地球完全控制").FontSize(a.fs(11)).TextColor(ColorHumans)
 		}
 	})
 }
 
 func (a *App) paintHoverTooltip(p *ui.Painter, r ui.Rect, hp *catalog.Planet, targetMap map[int]config.PlanetTarget) {
-	tx := r.X + mClamp(a.starMap.PointerX+14, 8, r.W-232)
-	ty := r.Y + mClamp(a.starMap.PointerY-14, 8, r.H-150)
-	card := ui.Rect{X: tx, Y: ty, W: 222, H: 120}
+	s := a.panelScale(1.0, 1.35)
+	cardW := float32(222) * s
+	cardH := float32(120) * s
 	if _, ok := targetMap[hp.ID]; ok {
-		card.H = 138
+		cardH = float32(138) * s
 	}
+	tx := r.X + mClamp(a.starMap.PointerX+14, 8, r.W-cardW-10)
+	ty := r.Y + mClamp(a.starMap.PointerY-14, 8, r.H-cardH-12)
+	card := ui.Rect{X: tx, Y: ty, W: cardW, H: cardH}
 	p.Fill(card, ui.RGBA(10, 14, 26, 0.94), 8)
 	p.Stroke(card, ui.Hex("#334155"), 8, 1)
 
 	title := fmt.Sprintf("%s (#%d)", hp.DisplayName(), hp.ID)
-	p.Text(card.X+10, card.Y+8, title, 12.5, HD2Gold)
+	p.Text(card.X+10, card.Y+8*s, title, a.fs(12.5), HD2Gold)
 	sub := hp.NameEN
 	if hp.SectorZH != "" {
 		sub += " · " + hp.SectorZH + "星区"
 	}
-	p.Text(card.X+10, card.Y+26, sub, 10.5, TextDim)
+	p.Text(card.X+10, card.Y+26*s, sub, a.fs(10.5), TextDim)
 	pctLbl := "解放"
 	if hp.IsDefense {
 		pctLbl = "防守"
 	}
-	p.Text(card.X+10, card.Y+45, fmt.Sprintf("归属: %s   %s: %.1f%%", catalog.FactionNameZH(hp.Owner), pctLbl, hp.LiberationPct()), 11, TextPrimary)
-	p.Text(card.X+10, card.Y+63, fmt.Sprintf("在线: %d 人   原版效果: %d 项", hp.Players, len(hp.ActiveEffects)), 11, TextDim)
+	p.Text(card.X+10, card.Y+45*s, fmt.Sprintf("归属: %s   %s: %.1f%%", catalog.FactionNameZH(hp.Owner), pctLbl, hp.LiberationPct()), a.fs(11), TextPrimary)
+	p.Text(card.X+10, card.Y+63*s, fmt.Sprintf("在线: %d 人   原版效果: %d 项", hp.Players, len(hp.ActiveEffects)), a.fs(11), TextDim)
 
-	barBg := ui.Rect{X: card.X + 10, Y: card.Y + 84, W: card.W - 20, H: 4}
+	barBg := ui.Rect{X: card.X + 10, Y: card.Y + 84*s, W: card.W - 20, H: 4}
 	p.Fill(barBg, ui.RGBA(255, 255, 255, 0.12), 2)
 	libFrac := float32(hp.LiberationPct() / 100.0)
 	p.Fill(ui.Rect{X: barBg.X, Y: barBg.Y, W: barBg.W * libFrac, H: 4}, FactionColor(hp.Owner), 2)
@@ -959,10 +964,10 @@ func (a *App) paintHoverTooltip(p *ui.Painter, r ui.Rect, hp *catalog.Planet, ta
 		if !tgt.Enabled {
 			state = "已配置（暂停）"
 		}
-		p.Text(card.X+10, card.Y+96, fmt.Sprintf("%s · +%d / -%d 效果", state, len(tgt.Effects), len(tgt.DisabledNativeEffects)), 11, CyanActive)
-		p.Text(card.X+10, card.Y+115, "单击选中编辑 · Ctrl+单击多选", 10, TextMute)
+		p.Text(card.X+10, card.Y+96*s, fmt.Sprintf("%s · +%d / -%d 效果", state, len(tgt.Effects), len(tgt.DisabledNativeEffects)), a.fs(11), CyanActive)
+		p.Text(card.X+10, card.Y+115*s, "单击选中编辑 · Ctrl+单击多选", a.fs(10), TextMute)
 	} else {
-		p.Text(card.X+10, card.Y+96, "单击选中配置 · Ctrl+单击多选", 10, TextMute)
+		p.Text(card.X+10, card.Y+96*s, "单击选中配置 · Ctrl+单击多选", a.fs(10), TextMute)
 	}
 }
 

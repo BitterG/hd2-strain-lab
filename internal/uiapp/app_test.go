@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/egoist/mygo/ui"
+	"hd2-strain-lab/internal/config"
 )
 
 func TestUIViewSelectPlanetAndDispatch(t *testing.T) {
@@ -303,6 +304,64 @@ func TestUIViewCopyPlanetEffectsToAnotherPlanet(t *testing.T) {
 	}
 	if got := len(app.plan.Targets[0].Effects); got != expectedCount {
 		t.Fatalf("expected %d copied effects on planet 1, got %v", expectedCount, app.plan.Targets[0].Effects)
+	}
+}
+
+func TestUIViewFontScaleSettingAndPersistence(t *testing.T) {
+	prof := t.TempDir()
+	t.Setenv("HD2_STRAIN_LAB_PROFILE", prof)
+
+	app, err := NewApp()
+	if err != nil {
+		t.Fatalf("NewApp failed: %v", err)
+	}
+	defer app.stopProxy()
+
+	tt := ui.NewTester(app.View, 1380, 860)
+	if math.Abs(app.settings.FontScale-1.0) > 1e-6 || app.theme.FontSize != 13 {
+		t.Fatalf("expected default font scale 1.0 (13pt), got scale=%v size=%v", app.settings.FontScale, app.theme.FontSize)
+	}
+
+	// Step up via header A+ button
+	if err := tt.Click("A+"); err != nil {
+		t.Fatalf("click header A+ failed: %v", err)
+	}
+	if math.Abs(app.settings.FontScale-1.05) > 1e-6 {
+		t.Fatalf("expected font scale 1.05 after A+, got %v", app.settings.FontScale)
+	}
+
+	// Switch to proxy/settings tab and pick preset "特大 130%"
+	if err := tt.Click("代理下发与连接"); err != nil {
+		t.Fatalf("switch to proxy tab failed: %v", err)
+	}
+	if err := tt.Click("特大 130%"); err != nil {
+		t.Fatalf("click preset 130%% failed: %v", err)
+	}
+	if math.Abs(app.settings.FontScale-1.30) > 1e-6 || app.theme.FontSize != 17 {
+		t.Fatalf("expected font scale 1.30 (17pt), got scale=%v size=%v", app.settings.FontScale, app.theme.FontSize)
+	}
+
+	// Verify persistence on disk
+	loaded, err := config.LoadSettings(prof)
+	if err != nil {
+		t.Fatalf("LoadSettings failed: %v", err)
+	}
+	if math.Abs(loaded.FontScale-1.30) > 1e-6 {
+		t.Fatalf("expected persisted FontScale 1.30, got %v", loaded.FontScale)
+	}
+
+	// Step down via header A- then reset via percentage button
+	if err := tt.Click("A-"); err != nil {
+		t.Fatalf("click header A- failed: %v", err)
+	}
+	if math.Abs(app.settings.FontScale-1.25) > 1e-6 {
+		t.Fatalf("expected font scale 1.25 after A-, got %v", app.settings.FontScale)
+	}
+	if err := tt.Click("125%"); err != nil {
+		t.Fatalf("click reset percentage button failed: %v", err)
+	}
+	if math.Abs(app.settings.FontScale-1.0) > 1e-6 {
+		t.Fatalf("expected font scale reset to 1.0, got %v", app.settings.FontScale)
 	}
 }
 

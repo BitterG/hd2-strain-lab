@@ -2,6 +2,7 @@ package uiapp
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"slices"
 	"strconv"
@@ -22,10 +23,10 @@ var (
 )
 
 func (a *App) buildLeftNavigator(c *ui.Context) {
-	ui.Column(c).Width(258).FillHeight().Background(BgMid).BorderWidth(0, 1, 0, 0).BorderColor(BorderSub).Padding(10).Gap(8).Children(func() {
+	ui.Column(c).Width(258*a.panelScale(0.95, 1.25)).FillHeight().Background(BgMid).BorderWidth(0, 1, 0, 0).BorderColor(BorderSub).Padding(10).Gap(8).Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
-			ui.Text(c, "星球导航").FontSize(13).Bold().TextColor(HD2Gold)
-			ui.Textf(c, "%d 颗", len(a.galaxy.Planets)).FontSize(11).TextColor(TextMute)
+			ui.Text(c, "星球导航").FontSize(a.fs(13)).Bold().TextColor(HD2Gold)
+			ui.Textf(c, "%d 颗", len(a.galaxy.Planets)).FontSize(a.fs(11)).TextColor(TextMute)
 		})
 
 		ui.SearchField(c.Key("planet-search"), &a.planetQuery).Placeholder("名称 / 英文 / ID / 星区").FillWidth()
@@ -45,7 +46,7 @@ func (a *App) buildLeftNavigator(c *ui.Context) {
 					if active {
 						col = HD2Gold
 					}
-					ui.Text(c, lbl).FontSize(11).TextColor(col)
+					ui.Text(c, lbl).FontSize(a.fs(11)).TextColor(col)
 				})
 				if btn.Clicked() {
 					a.planetFilter = i
@@ -77,8 +78,8 @@ func (a *App) buildLeftNavigator(c *ui.Context) {
 					ui.Box(row.Context).Size(8, 8).Radius(4).Background(FactionColor(pl.Owner)).Shrink(0)
 					ui.Column(row.Context).Grow(1).Gap(1).Children(func() {
 						ui.Row(row.Context).AlignItems(ui.Center).Gap(4).Children(func() {
-							ui.Text(row.Context, pl.DisplayName()).FontSize(12).Bold().TextColor(TextPrimary)
-							ui.Textf(row.Context, "#%d", pl.ID).FontSize(10).TextColor(TextMute)
+							ui.Text(row.Context, pl.DisplayName()).FontSize(a.fs(12)).Bold().TextColor(TextPrimary)
+							ui.Textf(row.Context, "#%d", pl.ID).FontSize(a.fs(10)).TextColor(TextMute)
 						})
 						sub := pl.SectorZH
 						if sub != "" {
@@ -90,7 +91,7 @@ func (a *App) buildLeftNavigator(c *ui.Context) {
 							}
 							sub += pl.NameEN
 						}
-						ui.Text(row.Context, sub).FontSize(10).TextColor(TextMute)
+						ui.Text(row.Context, sub).FontSize(a.fs(10)).TextColor(TextMute)
 					})
 					if hasTgt {
 						badgeCol := CyanActive
@@ -100,14 +101,14 @@ func (a *App) buildLeftNavigator(c *ui.Context) {
 							txt = "暂停"
 						}
 						ui.Box(row.Context).Padding(2, 6).Radius(999).Background(badgeCol.Alpha(0.18)).Border(1, badgeCol.Alpha(0.65)).Children(func() {
-							ui.Text(row.Context, txt).FontSize(10).TextColor(badgeCol)
+							ui.Text(row.Context, txt).FontSize(a.fs(10)).TextColor(badgeCol)
 						})
 					} else if pl.IsDefense {
 						ui.Box(row.Context).Padding(2, 5).Radius(999).Background(RedDanger.Alpha(0.2)).Children(func() {
-							ui.Text(row.Context, "防").FontSize(10).TextColor(RedDanger)
+							ui.Text(row.Context, "防").FontSize(a.fs(10)).TextColor(RedDanger)
 						})
 					} else if pl.HasCampaign {
-						ui.Textf(row.Context, "%.0f%%", pl.LiberationPct()).FontSize(10).TextColor(HD2Gold)
+						ui.Textf(row.Context, "%.0f%%", pl.LiberationPct()).FontSize(a.fs(10)).TextColor(HD2Gold)
 					}
 				})
 				if r.Clicked() {
@@ -119,7 +120,7 @@ func (a *App) buildLeftNavigator(c *ui.Context) {
 }
 
 func (a *App) buildRightConsole(c *ui.Context) {
-	ui.Column(c).Width(404).FillHeight().Background(BgMid).BorderWidth(0, 0, 0, 1).BorderColor(BorderSub).Padding(12).Gap(10).Children(func() {
+	ui.Column(c).Width(404*a.panelScale(0.95, 1.25)).FillHeight().Background(BgMid).BorderWidth(0, 0, 0, 1).BorderColor(BorderSub).Padding(12).Gap(10).Children(func() {
 		ui.Segmented(c.Key("right-tabs"), &a.rightTab, "星球变种配置", "代理下发与连接").FillWidth()
 
 		if a.rightTab == 0 {
@@ -134,8 +135,8 @@ func (a *App) buildVariantTab(c *ui.Context) {
 	// 1. Selected planets header & actions
 	if len(a.selectedIDs) == 0 {
 		ui.Column(c).Padding(12).Gap(6).Radius(8).Background(BgCard).Border(1, BorderSub).Children(func() {
-			ui.Text(c, "未选中星球").FontSize(13).Bold().TextColor(HD2Gold)
-			ui.Text(c, "在左侧列表或中央星图上单击星球即可开始编辑变种与战役配置；按住 Ctrl 单击可多选并批量下发。").FontSize(11.5).TextColor(TextDim)
+			ui.Text(c, "未选中星球").FontSize(a.fs(13)).Bold().TextColor(HD2Gold)
+			ui.Text(c, "在左侧列表或中央星图上单击星球即可开始编辑变种与战役配置；按住 Ctrl 单击可多选并批量下发。").FontSize(a.fs(11.5)).TextColor(TextDim)
 		})
 		a.buildConfiguredList(c)
 		return
@@ -158,9 +159,9 @@ func (a *App) buildVariantTab(c *ui.Context) {
 			}
 			ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
 				ui.Column(c).Gap(2).Grow(1).Children(func() {
-					ui.Text(c, name).FontSize(14).Bold().TextColor(CyanBright)
+					ui.Text(c, name).FontSize(a.fs(14)).Bold().TextColor(CyanBright)
 					if sub != "" {
-						ui.Text(c, sub).FontSize(11).TextColor(TextDim)
+						ui.Text(c, sub).FontSize(a.fs(11)).TextColor(TextDim)
 					}
 				})
 				if owner > 0 {
@@ -171,13 +172,13 @@ func (a *App) buildVariantTab(c *ui.Context) {
 						lbl = fmt.Sprintf("防守战 · %.1f%%", lib)
 					}
 					ui.Box(c).Padding(3, 8).Radius(999).Background(fc.Alpha(0.18)).Border(1, fc.Alpha(0.7)).Children(func() {
-						ui.Text(c, lbl).FontSize(10.5).TextColor(fc)
+						ui.Text(c, lbl).FontSize(a.fs(10.5)).TextColor(fc)
 					})
 				}
 			})
 		} else {
 			ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
-				ui.Textf(c, "已批量选中 %d 颗星球", len(a.selectedIDs)).FontSize(14).Bold().TextColor(CyanBright)
+				ui.Textf(c, "已批量选中 %d 颗星球", len(a.selectedIDs)).FontSize(a.fs(14)).Bold().TextColor(CyanBright)
 				if ui.Button(c.Key("clr-sel"), "取消多选").Clicked() {
 					a.selectedIDs = a.selectedIDs[:1]
 					a.syncDraftFromSelection()
@@ -198,7 +199,7 @@ func (a *App) buildVariantTab(c *ui.Context) {
 			if len(a.selectedIDs) > 5 {
 				more = fmt.Sprintf(" 等 %d 颗", len(a.selectedIDs))
 			}
-			ui.Text(c, strings.Join(names, "、")+more).FontSize(11).TextColor(TextDim)
+			ui.Text(c, strings.Join(names, "、")+more).FontSize(a.fs(11)).TextColor(TextDim)
 		}
 
 		ui.Row(c).Gap(6).Children(func() {
@@ -235,7 +236,7 @@ func (a *App) buildVariantTab(c *ui.Context) {
 	ui.Column(c).Padding(9).Gap(6).Radius(8).Background(BgCard).Border(1, BorderSub).Children(func() {
 		// 1) Native Effects on the planet
 		ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
-			ui.Textf(c, "原版自带效果 (%d)", len(nativeEffects)).FontSize(12).Bold().TextColor(ColorHumans)
+			ui.Textf(c, "原版自带效果 (%d)", len(nativeEffects)).FontSize(a.fs(12)).Bold().TextColor(ColorHumans)
 			if len(nativeEffects) > 0 {
 				ui.Row(c).Gap(4).Children(func() {
 					if len(a.draft.DisabledNativeEffects) < len(nativeEffects) {
@@ -252,7 +253,7 @@ func (a *App) buildVariantTab(c *ui.Context) {
 			}
 		})
 		if len(nativeEffects) == 0 {
-			ui.Text(c, "该星球在当前战况中没有原版自带效果").FontSize(11).TextColor(TextMute)
+			ui.Text(c, "该星球在当前战况中没有原版自带效果").FontSize(a.fs(11)).TextColor(TextMute)
 		} else {
 			ui.Row(c).Wrap().Gap(4).Children(func() {
 				for _, eid := range nativeEffects {
@@ -268,8 +269,8 @@ func (a *App) buildVariantTab(c *ui.Context) {
 					chip := ui.Row(c.Key(fmt.Sprintf("nat-%d", eid))).Padding(3, 7).Gap(5).AlignItems(ui.Center).
 						Radius(999).Background(chipCol.Alpha(0.14)).Border(1, chipCol.Alpha(0.55)).Cursor(ui.CursorPointer)
 					chip.Children(func() {
-						ui.Text(c, label).FontSize(10.5).TextColor(chipCol)
-						ui.Text(c, action).FontSize(10).Bold().TextColor(TextPrimary)
+						ui.Text(c, label).FontSize(a.fs(10.5)).TextColor(chipCol)
+						ui.Text(c, action).FontSize(a.fs(10)).Bold().TextColor(TextPrimary)
 					})
 					if chip.Clicked() {
 						a.toggleDisableNativeEffect(eid)
@@ -282,7 +283,7 @@ func (a *App) buildVariantTab(c *ui.Context) {
 
 		// 2) Added Custom Effects on the planet
 		ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
-			ui.Textf(c, "已添加自定义效果 (%d)", len(a.draft.Effects)).FontSize(12).Bold().TextColor(CyanActive)
+			ui.Textf(c, "已添加自定义效果 (%d)", len(a.draft.Effects)).FontSize(a.fs(12)).Bold().TextColor(CyanActive)
 			if len(a.draft.Effects) > 0 {
 				if ui.Button(c.Key("clr-eff-top"), "清空已添加").Clicked() {
 					a.draft.Effects = nil
@@ -290,15 +291,15 @@ func (a *App) buildVariantTab(c *ui.Context) {
 			}
 		})
 		if len(a.draft.Effects) == 0 {
-			ui.Text(c, "尚未添加自定义效果，请在下方目录点击勾选").FontSize(11).TextColor(TextMute)
+			ui.Text(c, "尚未添加自定义效果，请在下方目录点击勾选").FontSize(a.fs(11)).TextColor(TextMute)
 		} else {
 			ui.Row(c).Wrap().Gap(4).Children(func() {
 				for _, eid := range a.draft.Effects {
 					chip := ui.Row(c.Key(fmt.Sprintf("add-%d", eid))).Padding(3, 7).Gap(5).AlignItems(ui.Center).
 						Radius(999).Background(CyanActive.Alpha(0.15)).Border(1, CyanActive.Alpha(0.70)).Cursor(ui.CursorPointer)
 					chip.Children(func() {
-						ui.Textf(c, "%s #%d", a.effectDisplayName(eid), eid).FontSize(10.5).TextColor(CyanBright)
-						ui.Text(c, "×").FontSize(11).Bold().TextColor(TextPrimary)
+						ui.Textf(c, "%s #%d", a.effectDisplayName(eid), eid).FontSize(a.fs(10.5)).TextColor(CyanBright)
+						ui.Text(c, "×").FontSize(a.fs(11)).Bold().TextColor(TextPrimary)
 					})
 					if chip.Clicked() {
 						a.toggleDraftEffect(eid)
@@ -316,13 +317,13 @@ func (a *App) buildVariantTab(c *ui.Context) {
 				hdrLbl = "▼ 战役与归属参数"
 			}
 			hdrBtn := ui.Box(c.Key("toggle-camp-cfg")).Padding(2, 4).Cursor(ui.CursorPointer).Children(func() {
-				ui.Text(c, hdrLbl).FontSize(12).Bold().TextColor(HD2Gold)
+				ui.Text(c, hdrLbl).FontSize(a.fs(12)).Bold().TextColor(HD2Gold)
 			})
 			if hdrBtn.Clicked() {
 				a.showCampaignCfg = !a.showCampaignCfg
 			}
 			ui.Row(c).AlignItems(ui.Center).Gap(6).Children(func() {
-				ui.Text(c, "启用").FontSize(11.5).TextColor(TextDim)
+				ui.Text(c, "启用").FontSize(a.fs(11.5)).TextColor(TextDim)
 				ui.Switch(c.Key("sw-en"), &a.draft.Enabled)
 			})
 		})
@@ -339,13 +340,13 @@ func (a *App) buildVariantTab(c *ui.Context) {
 
 		ui.Row(c).Gap(6).Children(func() {
 			ui.Column(c).Grow(1).Gap(2).Children(func() {
-				ui.Text(c, "星球归属").FontSize(10.5).TextColor(TextMute)
+				ui.Text(c, "星球归属").FontSize(a.fs(10.5)).TextColor(TextMute)
 				if ui.Select(c.Key("sel-owner"), &a.draftOwnerStr, ownerOptions).FillWidth().Changed() {
 					a.draft.Owner = parseLeadingOptionInt(a.draftOwnerStr, 0)
 				}
 			})
 			ui.Column(c).Grow(1).Gap(2).Children(func() {
-				ui.Text(c, "战役类型").FontSize(10.5).TextColor(TextMute)
+				ui.Text(c, "战役类型").FontSize(a.fs(10.5)).TextColor(TextMute)
 				if ui.Select(c.Key("sel-ctype"), &a.draftTypeStr, campTypeOptions).FillWidth().Changed() {
 					a.draft.CampaignType = parseLeadingOptionInt(a.draftTypeStr, 0)
 					if a.draft.CampaignType == 4 {
@@ -363,13 +364,13 @@ func (a *App) buildVariantTab(c *ui.Context) {
 
 		ui.Row(c).Gap(6).Children(func() {
 			ui.Column(c).Grow(1).Gap(2).Children(func() {
-				ui.Text(c, "作战敌人").FontSize(10.5).TextColor(TextMute)
+				ui.Text(c, "作战敌人").FontSize(a.fs(10.5)).TextColor(TextMute)
 				if ui.Select(c.Key("sel-race"), &a.draftRaceStr, campRaceOptions).FillWidth().Changed() {
 					a.draft.CampaignRace = parseLeadingOptionInt(a.draftRaceStr, 0)
 				}
 			})
 			ui.Column(c).Width(115).Gap(2).Children(func() {
-				ui.Text(c, "作战槽数量").FontSize(10.5).TextColor(TextMute)
+				ui.Text(c, "作战槽数量").FontSize(a.fs(10.5)).TextColor(TextMute)
 				if ui.NumberInput(c.Key("num-cnt"), &a.draftCountF, 1, 200, 1).FillWidth().Changed() {
 					a.draft.CampaignCount = int(a.draftCountF)
 				}
@@ -387,7 +388,7 @@ func (a *App) buildVariantTab(c *ui.Context) {
 					}
 				}
 				ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
-					ui.Text(c, "进攻来源: "+srcText).FontSize(11.5).TextColor(TextPrimary)
+					ui.Text(c, "进攻来源: "+srcText).FontSize(a.fs(11.5)).TextColor(TextPrimary)
 					lbl := "从星图拾取"
 					if a.starMap.PickingSource {
 						lbl = "拾取中..."
@@ -398,19 +399,19 @@ func (a *App) buildVariantTab(c *ui.Context) {
 				})
 				ui.Row(c).Gap(6).Children(func() {
 					ui.Column(c).Grow(1).Gap(2).Children(func() {
-						ui.Text(c, "入侵等级").FontSize(10).TextColor(TextMute)
+						ui.Text(c, "入侵等级").FontSize(a.fs(10)).TextColor(TextMute)
 						if ui.NumberInput(c.Key("def-lvl"), &a.draftDefLevelF, 1, 100, 1).FillWidth().Changed() {
 							a.draft.DefenseLevel = int(a.draftDefLevelF)
 						}
 					})
 					ui.Column(c).Grow(1).Gap(2).Children(func() {
-						ui.Text(c, "时长(小时)").FontSize(10).TextColor(TextMute)
+						ui.Text(c, "时长(小时)").FontSize(a.fs(10)).TextColor(TextMute)
 						if ui.NumberInput(c.Key("def-hrs"), &a.draftDefHoursF, 1, 168, 1).FillWidth().Changed() {
 							a.draft.DefenseHours = int(a.draftDefHoursF)
 						}
 					})
 					ui.Column(c).Grow(1).Gap(2).Children(func() {
-						ui.Text(c, "防守作战数").FontSize(10).TextColor(TextMute)
+						ui.Text(c, "防守作战数").FontSize(a.fs(10)).TextColor(TextMute)
 						if ui.NumberInput(c.Key("def-cnt"), &a.draftDefCountF, 1, 200, 1).FillWidth().Changed() {
 							a.draft.DefenseCount = int(a.draftDefCountF)
 						}
@@ -423,7 +424,7 @@ func (a *App) buildVariantTab(c *ui.Context) {
 	// Effect Catalog Picker
 	ui.Column(c).Grow(1).Padding(10).Gap(6).Radius(8).Background(BgCard).Border(1, BorderSub).Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
-			ui.Textf(c, "星系效果与变种 (%d 已选)", len(a.draft.Effects)).FontSize(12.5).Bold().TextColor(HD2Gold)
+			ui.Textf(c, "星系效果与变种 (%d 已选)", len(a.draft.Effects)).FontSize(a.fs(12.5)).Bold().TextColor(HD2Gold)
 			if len(a.draft.Effects) > 0 {
 				if ui.Button(c.Key("clr-eff"), "清空效果").Clicked() {
 					a.draft.Effects = nil
@@ -449,7 +450,7 @@ func (a *App) buildVariantTab(c *ui.Context) {
 					if active {
 						col = HD2Gold
 					}
-					ui.Text(c, g).FontSize(10.5).TextColor(col)
+					ui.Text(c, g).FontSize(a.fs(10.5)).TextColor(col)
 				})
 				if chip.Clicked() {
 					a.effectGroup = g
@@ -479,13 +480,13 @@ func (a *App) buildVariantTab(c *ui.Context) {
 					if checked {
 						box.Background(CyanActive)
 						box.Children(func() {
-							ui.Text(row.Context, "✓").FontSize(10.5).Bold().TextColor(BgDeep)
+							ui.Text(row.Context, "✓").FontSize(a.fs(10.5)).Bold().TextColor(BgDeep)
 						})
 					} else {
 						box.Border(1, TextMute)
 					}
 					ui.Column(row.Context).Grow(1).Gap(1).Children(func() {
-						ui.Text(row.Context, eff.Name).FontSize(11.5).TextColor(TextPrimary)
+						ui.Text(row.Context, eff.Name).FontSize(a.fs(11.5)).TextColor(TextPrimary)
 						meta := fmt.Sprintf("#%d", eff.ID)
 						if eff.GroupLabel != "" {
 							meta += " · " + eff.GroupLabel
@@ -493,7 +494,7 @@ func (a *App) buildVariantTab(c *ui.Context) {
 						if eff.EnglishName != "" && !strings.HasPrefix(eff.EnglishName, "Unresolved") {
 							meta += " · " + eff.EnglishName
 						}
-						ui.Text(row.Context, meta).FontSize(10).TextColor(TextMute)
+						ui.Text(row.Context, meta).FontSize(a.fs(10)).TextColor(TextMute)
 					})
 				})
 				if r.Clicked() {
@@ -504,7 +505,7 @@ func (a *App) buildVariantTab(c *ui.Context) {
 
 	// Compact footer showing total configured planets
 	ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Padding(2, 4).Children(func() {
-		ui.Textf(c, "总方案: %d 颗星球", len(a.plan.Targets)).FontSize(11).TextColor(TextDim)
+		ui.Textf(c, "总方案: %d 颗星球", len(a.plan.Targets)).FontSize(a.fs(11)).TextColor(TextDim)
 		if len(a.plan.Targets) > 0 {
 			if ui.Button(c.Key("view-all-cfg"), "查看全部已配置").Clicked() {
 				a.selectedIDs = nil
@@ -516,7 +517,7 @@ func (a *App) buildVariantTab(c *ui.Context) {
 func (a *App) buildConfiguredList(c *ui.Context) {
 	ui.Column(c).Grow(1).Padding(10).Gap(6).Radius(8).Background(BgCard).Border(1, BorderSub).Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
-			ui.Textf(c, "已配置星球方案 (%d)", len(a.plan.Targets)).FontSize(12.5).Bold().TextColor(HD2Gold)
+			ui.Textf(c, "已配置星球方案 (%d)", len(a.plan.Targets)).FontSize(a.fs(12.5)).Bold().TextColor(HD2Gold)
 			if len(a.plan.Targets) > 0 {
 				if ui.Button(c.Key("save-all-cfg"), "全部下发").Clicked() {
 					if err := a.saveAndDispatch(); err != nil {
@@ -528,7 +529,7 @@ func (a *App) buildConfiguredList(c *ui.Context) {
 			}
 		})
 		if len(a.plan.Targets) == 0 {
-			ui.Text(c, "暂无已配置星球。请在星图上点击任意星球并勾选效果后点击「保存并下发到代理」。").FontSize(11.5).TextColor(TextMute)
+			ui.Text(c, "暂无已配置星球。请在星图上点击任意星球并勾选效果后点击「保存并下发到代理」。").FontSize(a.fs(11.5)).TextColor(TextMute)
 			return
 		}
 		ui.Scroll(c.Key("cfg-scroll")).Grow(1).FillWidth().Children(func() {
@@ -548,8 +549,8 @@ func (a *App) buildConfiguredList(c *ui.Context) {
 							a.setTargetEnabled(t.Planet, en)
 						}
 						ui.Column(c).Grow(1).Gap(2).Children(func() {
-							ui.Text(c, name).FontSize(12).Bold().TextColor(TextPrimary)
-							ui.Textf(c, "效果: +%d / -%d · 战役=%v · 归属=%d", len(t.Effects), len(t.DisabledNativeEffects), t.Campaign, t.Owner).FontSize(10.5).TextColor(TextMute)
+							ui.Text(c, name).FontSize(a.fs(12)).Bold().TextColor(TextPrimary)
+							ui.Textf(c, "效果: +%d / -%d · 战役=%v · 归属=%d", len(t.Effects), len(t.DisabledNativeEffects), t.Campaign, t.Owner).FontSize(a.fs(10.5)).TextColor(TextMute)
 						})
 						if ui.Button(c.Key(fmt.Sprintf("tgo-%d", t.Planet)), "定位").Clicked() {
 							a.selectedIDs = []int{t.Planet}
@@ -577,19 +578,19 @@ func (a *App) buildProxyTab(c *ui.Context) {
 			// 1. Proxy Start/Stop & Dispatch Card
 			ui.Column(c).Padding(10).Gap(8).Radius(8).Background(BgCard).Border(1, BorderSub).Children(func() {
 				ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
-					ui.Text(c, "代理服务与配置下发").FontSize(13).Bold().TextColor(HD2Gold)
+					ui.Text(c, "代理服务与配置下发").FontSize(a.fs(13)).Bold().TextColor(HD2Gold)
 					if st.Running {
 						ui.Box(c).Padding(2, 8).Radius(999).Background(GreenOK.Alpha(0.18)).Border(1, GreenOK).Children(func() {
-							ui.Textf(c, "运行中 :%d", st.Port).FontSize(10.5).TextColor(GreenOK)
+							ui.Textf(c, "运行中 :%d", st.Port).FontSize(a.fs(10.5)).TextColor(GreenOK)
 						})
 					} else {
 						ui.Box(c).Padding(2, 8).Radius(999).Background(TextMute.Alpha(0.18)).Children(func() {
-							ui.Text(c, "已停止").FontSize(10.5).TextColor(TextDim)
+							ui.Text(c, "已停止").FontSize(a.fs(10.5)).TextColor(TextDim)
 						})
 					}
 				})
 
-				ui.Text(c, st.LastMessage).FontSize(11.5).TextColor(TextPrimary)
+				ui.Text(c, st.LastMessage).FontSize(a.fs(11.5)).TextColor(TextPrimary)
 
 				ui.Row(c).Gap(8).Children(func() {
 					if st.Running {
@@ -619,26 +620,26 @@ func (a *App) buildProxyTab(c *ui.Context) {
 				})
 
 				ui.Row(c).Gap(12).Children(func() {
-					ui.Textf(c, "战况命中: %d", st.StatusHits).FontSize(11).TextColor(TextDim)
-					ui.Textf(c, "改写下发: %d", st.Rewrites).FontSize(11).TextColor(CyanActive)
-					ui.Textf(c, "目录数: %d", st.CatalogCount).FontSize(11).TextColor(TextDim)
+					ui.Textf(c, "战况命中: %d", st.StatusHits).FontSize(a.fs(11)).TextColor(TextDim)
+					ui.Textf(c, "改写下发: %d", st.Rewrites).FontSize(a.fs(11)).TextColor(CyanActive)
+					ui.Textf(c, "目录数: %d", st.CatalogCount).FontSize(a.fs(11)).TextColor(TextDim)
 				})
 			})
 
 			// 2. Certificate Card
 			ui.Column(c).Padding(10).Gap(7).Radius(8).Background(BgCard).Border(1, BorderSub).Children(func() {
 				ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
-					ui.Text(c, "1. 本机 TLS 证书 (当前用户信任)").FontSize(12.5).Bold().TextColor(HD2Gold)
+					ui.Text(c, "1. 本机 TLS 证书 (当前用户信任)").FontSize(a.fs(12.5)).Bold().TextColor(HD2Gold)
 					if trusted {
-						ui.Text(c, "已信任").FontSize(11).Bold().TextColor(GreenOK)
+						ui.Text(c, "已信任").FontSize(a.fs(11)).Bold().TextColor(GreenOK)
 					} else {
-						ui.Text(c, "未信任").FontSize(11).Bold().TextColor(ColorTerminids)
+						ui.Text(c, "未信任").FontSize(a.fs(11)).Bold().TextColor(ColorTerminids)
 					}
 				})
-				ui.Textf(c, "仅解密 %s，写入 CurrentUser\\ROOT，不修改整机系统策略或 hosts。", "api.live.prod.thehelldiversgame.com").FontSize(11).TextColor(TextDim)
+				ui.Textf(c, "仅解密 %s，写入 CurrentUser\\ROOT，不修改整机系统策略或 hosts。", "api.live.prod.thehelldiversgame.com").FontSize(a.fs(11)).TextColor(TextDim)
 				thumb := a.certsMgr.Thumbprint()
 				if len(thumb) > 16 {
-					ui.Textf(c, "指纹: %s...%s", thumb[:10], thumb[len(thumb)-8:]).FontSize(10.5).TextColor(TextMute)
+					ui.Textf(c, "指纹: %s...%s", thumb[:10], thumb[len(thumb)-8:]).FontSize(a.fs(10.5)).TextColor(TextMute)
 				}
 				ui.Row(c).Gap(6).Children(func() {
 					if !trusted {
@@ -672,13 +673,13 @@ func (a *App) buildProxyTab(c *ui.Context) {
 
 			// 3. Steam Launch Bridge Card
 			ui.Column(c).Padding(10).Gap(7).Radius(8).Background(BgCard).Border(1, BorderSub).Children(func() {
-				ui.Text(c, "2. Steam 启动选项桥接").FontSize(12.5).Bold().TextColor(HD2Gold)
-				ui.Text(c, "将下方命令粘贴到 Steam → 绝地潜兵 2 属性 → 通用 → 启动选项。代理关闭时正常直连游戏。").FontSize(11).TextColor(TextDim)
+				ui.Text(c, "2. Steam 启动选项桥接").FontSize(a.fs(12.5)).Bold().TextColor(HD2Gold)
+				ui.Text(c, "将下方命令粘贴到 Steam → 绝地潜兵 2 属性 → 通用 → 启动选项。代理关闭时正常直连游戏。").FontSize(a.fs(11)).TextColor(TextDim)
 
 				exePath, _ := os.Executable()
 				launchOpt := bridge.SteamLaunchOption(exePath)
 				ui.Box(c).Padding(7, 9).Radius(6).Background(BgDeep).Border(1, BorderSub).Children(func() {
-					ui.Text(c, launchOpt).FontSize(10.5).TextColor(CyanBright)
+					ui.Text(c, launchOpt).FontSize(a.fs(10.5)).TextColor(CyanBright)
 				})
 				if ui.Button(c.Key("copy-steam"), "复制 Steam 启动选项").FillWidth().Clicked() {
 					c.WriteClipboardThen(launchOpt, func(err error) {
@@ -691,9 +692,48 @@ func (a *App) buildProxyTab(c *ui.Context) {
 				}
 			})
 
-			// 4. Upstream Proxy & Policy Settings
+			// 4. UI Font Scale, Upstream Proxy & Policy Settings
 			ui.Column(c).Padding(10).Gap(7).Radius(8).Background(BgCard).Border(1, BorderSub).Children(func() {
-				ui.Text(c, "3. 加速器兼容与下发选项").FontSize(12.5).Bold().TextColor(HD2Gold)
+				ui.Text(c, "3. 界面字体、加速器与下发选项").FontSize(a.fs(12.5)).Bold().TextColor(HD2Gold)
+
+				pct := int(math.Round(float64(a.fontScale()) * 100))
+				ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
+					ui.Textf(c, "界面字体大小: %d%%", pct).FontSize(a.fs(11.5)).TextColor(TextPrimary)
+					ui.Row(c).Gap(4).Children(func() {
+						if ui.Button(c.Key("cfg-fs-down"), "-5%").Disabled(a.settings.FontScale <= 0.801).Clicked() {
+							a.setFontScale(float64(a.fontScale()) - 0.05)
+						}
+						if ui.Button(c.Key("cfg-fs-up"), "+5%").Disabled(a.settings.FontScale >= 1.499).Clicked() {
+							a.setFontScale(float64(a.fontScale()) + 0.05)
+						}
+					})
+				})
+				ui.Row(c).Wrap().Gap(5).Children(func() {
+					presets := []struct {
+						label string
+						scale float64
+					}{
+						{"小 85%", 0.85},
+						{"标准 100%", 1.0},
+						{"大 115%", 1.15},
+						{"特大 130%", 1.30},
+					}
+					for _, pr := range presets {
+						active := math.Abs(float64(a.fontScale())-pr.scale) < 0.015
+						k := c.Key(fmt.Sprintf("fs-%d", int(pr.scale*100)))
+						var btn ui.Element
+						if active {
+							btn = ui.PrimaryButton(k, pr.label)
+						} else {
+							btn = ui.Button(k, pr.label)
+						}
+						if btn.Clicked() {
+							a.setFontScale(pr.scale)
+						}
+					}
+				})
+
+				ui.Divider(c)
 
 				changed := false
 				if ui.Checkbox(c.Key("chk-up"), &a.settings.UseUpstreamProxy, "经由上游 HTTP 代理访问游戏 API（配合加速器）").Changed() {
@@ -724,15 +764,15 @@ func (a *App) buildProxyTab(c *ui.Context) {
 
 			// 5. Audit Logs
 			ui.Column(c).Padding(10).Gap(6).Radius(8).Background(BgCard).Border(1, BorderSub).Children(func() {
-				ui.Text(c, "代理审计日志").FontSize(12).Bold().TextColor(TextDim)
+				ui.Text(c, "代理审计日志").FontSize(a.fs(12)).Bold().TextColor(TextDim)
 				ui.Box(c).Height(130).FillWidth().Padding(8).Radius(6).Background(BgDeep).Border(1, BorderSub).Children(func() {
 					ui.Scroll(c.Key("log-scroll")).Fill().Children(func() {
 						ui.Column(c).Gap(2).Children(func() {
 							if len(st.Logs) == 0 {
-								ui.Text(c, "暂无日志").FontSize(10.5).TextColor(TextMute)
+								ui.Text(c, "暂无日志").FontSize(a.fs(10.5)).TextColor(TextMute)
 							} else {
 								for i := len(st.Logs) - 1; i >= 0; i-- {
-									ui.Text(c, st.Logs[i]).FontSize(10.5).TextColor(TextDim)
+									ui.Text(c, st.Logs[i]).FontSize(a.fs(10.5)).TextColor(TextDim)
 								}
 							}
 						})
