@@ -1497,7 +1497,7 @@
     },
     {
       "id": 1203,
-      "name": "喷气旅 (图标)",
+      "name": "喷气旅",
       "native": "elite_bot_jumpattack",
       "effectType": 71,
       "experimental": true,
@@ -2220,7 +2220,7 @@
     },
     {
       "id": 1245,
-      "name": "掠食变种(图标)",
+      "name": "掠食变种",
       "native": "bugs_super_predator",
       "effectType": 71,
       "experimental": true,
@@ -2289,7 +2289,7 @@
     },
     {
       "id": 1249,
-      "name": "炙灼部队 (图标)",
+      "name": "炙灼部队",
       "native": "bots_ivory_legion",
       "effectType": 71,
       "experimental": true,
@@ -2569,7 +2569,7 @@
     },
     {
       "id": 1269,
-      "name": "大军 (图标)",
+      "name": "大军",
       "native": "illuminate_fleet",
       "effectType": 71,
       "experimental": true,
@@ -3194,7 +3194,7 @@
     },
     {
       "id": 1308,
-      "name": "霸王虫(图标)",
+      "name": "霸王虫",
       "native": "bugs_hive_lord",
       "effectType": 71,
       "experimental": true,
@@ -3213,7 +3213,7 @@
     },
     {
       "id": 1309,
-      "name": "蟑龙(图标)",
+      "name": "蟑龙",
       "native": "bugs_dragon",
       "effectType": 71,
       "experimental": true,
@@ -3232,7 +3232,7 @@
     },
     {
       "id": 1310,
-      "name": "爆裂变种(图标)",
+      "name": "爆裂变种",
       "native": "bugs_burrower",
       "effectType": 71,
       "experimental": true,
@@ -3961,7 +3961,7 @@
     },
     {
       "id": 1353,
-      "name": "机器人\"数据库一号\"(含图标)",
+      "name": "机器人\"数据库一号\"",
       "native": "bot_facility_data",
       "effectType": 71,
       "experimental": true,
@@ -4098,7 +4098,7 @@
     },
     {
       "id": 1361,
-      "name": "生化人 (图标)",
+      "name": "生化人",
       "native": "bots_cyborgs",
       "effectType": 71,
       "experimental": true,
@@ -4373,7 +4373,7 @@
     },
     {
       "id": 1378,
-      "name": "无脑群氓 (图标)",
+      "name": "无脑群氓",
       "native": "illuminate_harvester",
       "effectType": 71,
       "experimental": true,
@@ -4392,7 +4392,7 @@
     },
     {
       "id": 1379,
-      "name": "占领者 (图标)",
+      "name": "占领者",
       "native": "illuminate_engineer",
       "effectType": 71,
       "experimental": true,
@@ -4504,7 +4504,7 @@
     },
     {
       "id": 1386,
-      "name": "孢裂（图标）",
+      "name": "孢裂",
       "native": "bugs_gloom",
       "effectType": 71,
       "experimental": false,
@@ -4685,7 +4685,7 @@
     },
     {
       "id": 1396,
-      "name": "终结族遏制系统控制塔（图标）",
+      "name": "终结族遏制系统控制塔",
       "native": "bug_tcs_towers",
       "effectType": 71,
       "experimental": true,
@@ -4817,7 +4817,7 @@
     },
     {
       "id": 1403,
-      "name": "窃票者（图标）",
+      "name": "窃票者",
       "native": "illuminate_bodyhorror",
       "effectType": 71,
       "experimental": true,
@@ -5011,7 +5011,7 @@
     },
     {
       "id": 1414,
-      "name": "入侵舰队（图标）",
+      "name": "入侵舰队",
       "native": "illuminate_invading",
       "effectType": 71,
       "experimental": true,
@@ -5365,7 +5365,7 @@
         2982396937,
         0
       ],
-      "name": "毒瘴变种（图标）",
+      "name": "毒瘴变种",
       "englishName": "TOXIC MIASMA STRAIN / Noxious Strain",
       "groupKey": "enemies",
       "groupLabel": "敌情与变种",
