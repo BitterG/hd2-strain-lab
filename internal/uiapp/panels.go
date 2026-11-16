@@ -332,10 +332,41 @@ func (a *App) buildVariantTab(c *ui.Context) {
 		}
 
 		ui.Row(c).Wrap().Gap(10).Children(func() {
-			ui.Checkbox(c.Key("chk-camp"), &a.draft.Campaign, "开启战役")
-			ui.Checkbox(c.Key("chk-force"), &a.draft.ForceOpen, "强制开放(0血量)")
+			if ui.Checkbox(c.Key("chk-camp"), &a.draft.Campaign, "开启战役").Changed() && a.draft.Campaign {
+				if a.selectedHasNativeRegions() {
+					a.draft.ForceOpen = true
+					a.draft.OpenRegions = true
+					a.draft.InitializeRegions = true
+					if a.draft.CampaignRace == 0 {
+						a.draft.CampaignRace = a.selectedInferredRace()
+						a.draftRaceStr = findOptionByInt(campRaceOptions, a.draft.CampaignRace)
+					}
+				}
+			}
+			if ui.Checkbox(c.Key("chk-force"), &a.draft.ForceOpen, "强制开放(0血量)").Changed() && a.draft.ForceOpen {
+				a.draft.Campaign = true
+				if a.selectedHasNativeRegions() {
+					a.draft.OpenRegions = true
+					a.draft.InitializeRegions = true
+				}
+				if a.draft.CampaignRace == 0 {
+					a.draft.CampaignRace = a.selectedInferredRace()
+					a.draftRaceStr = findOptionByInt(campRaceOptions, a.draft.CampaignRace)
+				}
+				if a.draft.CampaignType != 4 && a.draft.Owner == 0 {
+					a.draft.Owner = a.draft.CampaignRace
+					a.draftOwnerStr = findOptionByInt(ownerOptions, a.draft.Owner)
+				}
+			}
 			ui.Checkbox(c.Key("chk-openreg"), &a.draft.OpenRegions, "开放分区")
-			ui.Checkbox(c.Key("chk-initreg"), &a.draft.InitializeRegions, "初始化分区")
+			if ui.Checkbox(c.Key("chk-initreg"), &a.draft.InitializeRegions, "初始化/补齐分区").Changed() && a.draft.InitializeRegions {
+				a.draft.Campaign = true
+				a.draft.ForceOpen = true
+				if a.draft.CampaignRace < 2 || a.draft.CampaignRace > 4 {
+					a.draft.CampaignRace = a.selectedInferredRace()
+					a.draftRaceStr = findOptionByInt(campRaceOptions, a.draft.CampaignRace)
+				}
+			}
 		})
 
 		ui.Row(c).Gap(6).Children(func() {
@@ -349,13 +380,29 @@ func (a *App) buildVariantTab(c *ui.Context) {
 				ui.Text(c, "战役类型").FontSize(a.fs(10.5)).TextColor(TextMute)
 				if ui.Select(c.Key("sel-ctype"), &a.draftTypeStr, campTypeOptions).FillWidth().Changed() {
 					a.draft.CampaignType = parseLeadingOptionInt(a.draftTypeStr, 0)
-					if a.draft.CampaignType == 4 {
+					switch a.draft.CampaignType {
+					case 3:
+						a.draft.Campaign = true
+						a.draft.ForceOpen = true
+						a.draft.OpenRegions = true
+						if a.selectedHasNativeRegions() {
+							a.draft.InitializeRegions = true
+						}
+						if a.draft.CampaignRace < 2 || a.draft.CampaignRace > 4 {
+							a.draft.CampaignRace = a.selectedInferredRace()
+							a.draftRaceStr = findOptionByInt(campRaceOptions, a.draft.CampaignRace)
+						}
+						if a.draft.Owner == 0 || a.draft.Owner == 1 {
+							a.draft.Owner = a.draft.CampaignRace
+							a.draftOwnerStr = findOptionByInt(ownerOptions, a.draft.Owner)
+						}
+					case 4:
 						a.draft.Campaign = true
 						a.draft.Owner = 1
 						a.draftOwnerStr = ownerOptions[1]
 						if a.draft.CampaignRace < 2 || a.draft.CampaignRace > 4 {
-							a.draft.CampaignRace = 2
-							a.draftRaceStr = campRaceOptions[1]
+							a.draft.CampaignRace = a.selectedInferredRace()
+							a.draftRaceStr = findOptionByInt(campRaceOptions, a.draft.CampaignRace)
 						}
 					}
 				}
@@ -367,6 +414,10 @@ func (a *App) buildVariantTab(c *ui.Context) {
 				ui.Text(c, "作战敌人").FontSize(a.fs(10.5)).TextColor(TextMute)
 				if ui.Select(c.Key("sel-race"), &a.draftRaceStr, campRaceOptions).FillWidth().Changed() {
 					a.draft.CampaignRace = parseLeadingOptionInt(a.draftRaceStr, 0)
+					if a.draft.ForceOpen && a.draft.CampaignType != 4 && a.draft.CampaignRace >= 2 {
+						a.draft.Owner = a.draft.CampaignRace
+						a.draftOwnerStr = findOptionByInt(ownerOptions, a.draft.Owner)
+					}
 				}
 			})
 			ui.Column(c).Width(115).Gap(2).Children(func() {

@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 // PlanetTarget represents a single planet's custom variant & campaign override configuration.
@@ -92,6 +94,66 @@ func DefaultSettings() Settings {
 		AllowAllEffects:  false,
 		FontScale:        1.0,
 	}
+}
+
+// EffectiveUpstreamProxyURL returns the configured upstream proxy URL when UseUpstreamProxy is true,
+// falling back to the Windows system HTTP proxy if UpstreamProxyURL is empty.
+func (s Settings) EffectiveUpstreamProxyURL() string {
+	if !s.UseUpstreamProxy {
+		return ""
+	}
+	u := strings.TrimSpace(s.UpstreamProxyURL)
+	if u != "" {
+		if !strings.Contains(u, "://") {
+			u = "http://" + u
+		}
+		return u
+	}
+	return DetectSystemHTTPProxy()
+}
+
+// DetectSystemHTTPProxy reads the current user's Windows Internet Settings proxy if enabled.
+func DetectSystemHTTPProxy() string {
+	cmd := exec.Command("reg", "query", `HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings`)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	text := string(out)
+	enabled := false
+	var rawServer string
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "ProxyEnable") && strings.HasSuffix(line, "0x1") {
+			enabled = true
+		} else if strings.HasPrefix(line, "ProxyServer") {
+			if idx := strings.Index(line, "REG_SZ"); idx >= 0 {
+				rawServer = strings.TrimSpace(line[idx+len("REG_SZ"):])
+			}
+		}
+	}
+	if !enabled || rawServer == "" {
+		return ""
+	}
+	if strings.Contains(rawServer, "=") {
+		picked := ""
+		for _, part := range strings.Split(rawServer, ";") {
+			part = strings.TrimSpace(part)
+			if v, ok := strings.CutPrefix(part, "http="); ok {
+				picked = strings.TrimSpace(v)
+				break
+			}
+		}
+		rawServer = picked
+	}
+	if rawServer == "" {
+		return ""
+	}
+	if !strings.Contains(rawServer, "://") {
+		rawServer = "http://" + rawServer
+	}
+	return rawServer
 }
 
 // ProfileDir returns the persistent profile directory (%APPDATA%\HD2-Strain-Lab or override),
@@ -193,9 +255,9 @@ func NormalizeTargets(plan Plan) ([]PlanetTarget, error) {
 		if t.CampaignRace != 0 && t.CampaignRace != 1 && t.CampaignRace != 2 && t.CampaignRace != 3 && t.CampaignRace != 4 {
 			return nil, fmt.Errorf("星球 #%d 作战敌人阵营无效: %d", t.Planet, t.CampaignRace)
 		}
-		t.Campaign = t.Campaign || t.ForceOpen
-		if t.InitializeRegions && (!t.Campaign || (t.CampaignRace != 2 && t.CampaignRace != 3 && t.CampaignRace != 4)) {
-			return nil, fmt.Errorf("星球 #%d 初始化分区需要开启战役并明确选择敌人阵营", t.Planet)
+		t.Campaign = t.Campaign || t.ForceOpen || t.InitializeRegions
+		if t.InitializeRegions && t.CampaignRace == 1 {
+			return nil, fmt.Errorf("星球 #%d 初始化分区不能将作战敌人设为超级地球", t.Planet)
 		}
 		if t.CampaignCount == 0 {
 			t.CampaignCount = 20

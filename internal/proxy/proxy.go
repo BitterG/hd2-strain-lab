@@ -66,6 +66,8 @@ type Server struct {
 	onUpdate     func()
 	onLiveStatus func(raw []byte)
 
+	lastWarInfoAttempt map[[2]int]time.Time
+
 	// Optional overrides used by tests to point targetHost at a local TLS test server.
 	testUpstreamAddr string
 	testRootCAs      *x509.CertPool
@@ -84,15 +86,27 @@ func NewServer(cm *certs.Manager, plan config.Plan, settings config.Settings, on
 		rwCtx.RegionReference = doc
 	}
 	return &Server{
-		certs:        cm,
-		plan:         plan,
-		settings:     settings,
-		rwCtx:        rwCtx,
-		onUpdate:     onUpdate,
-		onLiveStatus: onLiveStatus,
+		certs:              cm,
+		plan:               plan,
+		settings:           settings,
+		rwCtx:              rwCtx,
+		onUpdate:           onUpdate,
+		onLiveStatus:       onLiveStatus,
+		lastWarInfoAttempt: make(map[[2]int]time.Time),
 		stats: Stats{
 			LastMessage: "代理未启动",
 		},
+	}
+}
+
+// SeedWarData updates the proxy's RegionReference (WarInfo) and AllowedEffects catalog
+// from live API payloads fetched by the UI.
+func (s *Server) SeedWarData(warID int, warInfoPlain, effectsPlain []byte) {
+	if len(warInfoPlain) > 0 {
+		s.handleObservedWarInfo(warID, warInfoPlain)
+	}
+	if len(effectsPlain) > 0 {
+		s.handleObservedEffects(effectsPlain)
 	}
 }
 
@@ -251,8 +265,8 @@ func (s *Server) dialUpstream(ctx context.Context, targetAddr string) (net.Conn,
 	settings := s.settings
 	s.mu.RUnlock()
 
-	if settings.UseUpstreamProxy && strings.TrimSpace(settings.UpstreamProxyURL) != "" {
-		u, err := url.Parse(strings.TrimSpace(settings.UpstreamProxyURL))
+	if upstreamURL := settings.EffectiveUpstreamProxyURL(); upstreamURL != "" {
+		u, err := url.Parse(upstreamURL)
 		if err == nil && u.Host != "" {
 			d := &net.Dialer{Timeout: 10 * time.Second}
 			upConn, err := d.DialContext(ctx, "tcp", u.Host)
@@ -460,6 +474,7 @@ func (s *Server) handleTargetMITM(clientConn net.Conn, br *bufio.Reader) {
 					if s.onLiveStatus != nil {
 						s.onLiveStatus(plain)
 					}
+					s.ensureFreshRegionReference(transport, path, plain)
 					patched, changed := s.handleStatusRewrite(plain)
 					if changed {
 						outBody = patched
@@ -533,6 +548,9 @@ func (s *Server) handleObservedWarInfo(warID int, plain []byte) {
 	if err != nil {
 		return
 	}
+	if _, ok := asSlice(doc["planetRegions"]); !ok {
+		return
+	}
 	s.mu.Lock()
 	s.rwCtx.RegionReference = doc
 	if warID > 0 {
@@ -541,6 +559,75 @@ func (s *Server) handleObservedWarInfo(warID int, plain []byte) {
 	s.appendLogLocked(fmt.Sprintf("已采集 WarInfo (warId=%d)", warID))
 	s.mu.Unlock()
 	s.notify()
+}
+
+// ensureFreshRegionReference fetches /api/WarSeason/{warId}/WarInfo on-demand when
+// an incoming Status has a newer layoutVersion than the cached RegionReference (matching CPV).
+func (s *Server) ensureFreshRegionReference(transport *http.Transport, statusPath string, statusPlain []byte) {
+	doc, err := decodeJSONObject(statusPlain)
+	if err != nil {
+		return
+	}
+	warID, okW := asInt(doc["warId"])
+	if !okW || warID <= 0 {
+		if m := statusPathRe.FindStringSubmatch(statusPath); len(m) == 2 {
+			warID, _ = strconv.Atoi(m[1])
+		}
+	}
+	if warID <= 0 {
+		return
+	}
+	layout, okL := asInt(doc["layoutVersion"])
+	if !okL {
+		return
+	}
+
+	s.mu.Lock()
+	needFetch := false
+	if s.rwCtx.RegionReference == nil {
+		needFetch = true
+	} else {
+		rw, okRW := asInt(s.rwCtx.RegionReference["warId"])
+		rl, okRL := asInt(s.rwCtx.RegionReference["layoutVersion"])
+		if !okRW || rw != warID || !okRL || rl != layout {
+			needFetch = true
+		}
+	}
+	if !needFetch {
+		s.mu.Unlock()
+		return
+	}
+	key := [2]int{warID, layout}
+	if last, ok := s.lastWarInfoAttempt[key]; ok && time.Since(last) < 15*time.Second {
+		s.mu.Unlock()
+		return
+	}
+	s.lastWarInfoAttempt[key] = time.Now()
+	s.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("https://%s/api/WarSeason/%d/WarInfo", certs.TargetHost, warID), nil)
+	if err != nil {
+		return
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept-Language", "en-US")
+	req.Header.Set("Cache-Control", "no-cache")
+	resp, err := transport.RoundTrip(req)
+	if err != nil {
+		return
+	}
+	rawBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 16*1024*1024))
+	_ = resp.Body.Close()
+	if readErr != nil || resp.StatusCode != http.StatusOK {
+		return
+	}
+	plain, _, errGz := maybeGunzip(rawBody, resp.Header.Get("Content-Encoding"))
+	if errGz != nil {
+		return
+	}
+	s.handleObservedWarInfo(warID, plain)
 }
 
 func (s *Server) handleStatusRewrite(plain []byte) ([]byte, bool) {

@@ -259,14 +259,11 @@ func (a *App) triggerLiveRefresh() {
 	}
 	a.refreshing = true
 	warID := a.galaxy.WarID
-	upstream := ""
-	if a.settings.UseUpstreamProxy {
-		upstream = a.settings.UpstreamProxyURL
-	}
+	upstream := a.settings.EffectiveUpstreamProxyURL()
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 		defer cancel()
-		warInfoRaw, statusRaw, _, err := catalog.RefreshFromLiveAPI(ctx, warID, upstream)
+		warInfoRaw, statusRaw, effectsRaw, err := catalog.RefreshFromLiveAPI(ctx, warID, upstream)
 		if a.win == nil {
 			return
 		}
@@ -279,6 +276,7 @@ func (a *App) triggerLiveRefresh() {
 			if applyErr := a.galaxy.ApplyWarData(warInfoRaw, statusRaw, "官方实时战况 "+time.Now().Format("15:04:05")); applyErr != nil {
 				a.toastMsg = applyErr.Error()
 			} else {
+				a.proxySrv.SeedWarData(a.galaxy.WarID, warInfoRaw, effectsRaw)
 				a.toastMsg = "已同步最新银河战况"
 			}
 		})
@@ -335,6 +333,29 @@ func (a *App) syncDraftFromSelection() {
 		a.draft.DefenseCount = 38
 	}
 	a.draftDefCountF = float64(a.draft.DefenseCount)
+	if len(a.selectedIDs) > 0 {
+		if pl := a.galaxy.PlanetsByID[a.selectedIDs[0]]; pl != nil && (!pl.HasCampaign || pl.HasNativeRegions) {
+			a.showCampaignCfg = true
+		}
+	}
+}
+
+func (a *App) selectedHasNativeRegions() bool {
+	for _, pid := range a.selectedIDs {
+		if pl := a.galaxy.PlanetsByID[pid]; pl != nil && pl.HasNativeRegions {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *App) selectedInferredRace() int {
+	for _, pid := range a.selectedIDs {
+		if pl := a.galaxy.PlanetsByID[pid]; pl != nil {
+			return pl.InferEnemyRace()
+		}
+	}
+	return catalog.FactionTerminids
 }
 
 func (a *App) toggleDraftEffect(eid int) {

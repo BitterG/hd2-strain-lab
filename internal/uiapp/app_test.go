@@ -365,3 +365,44 @@ func TestUIViewFontScaleSettingAndPersistence(t *testing.T) {
 	}
 }
 
+func TestUIViewCyberstanAutoRegionSetup(t *testing.T) {
+	t.Setenv("HD2_STRAIN_LAB_PROFILE", t.TempDir())
+
+	app, err := NewApp()
+	if err != nil {
+		t.Fatalf("NewApp failed: %v", err)
+	}
+	defer app.stopProxy()
+
+	tt := ui.NewTester(app.View, 1380, 860)
+
+	// Select Cyberstan (#260) on the star map
+	xy260, ok260 := app.starMap.screenXY[260]
+	if !ok260 {
+		t.Fatalf("expected projected coordinates for Cyberstan (#260)")
+	}
+	tt.ClickAt(xy260[0], xy260[1])
+	if len(app.selectedIDs) != 1 || app.selectedIDs[0] != 260 {
+		t.Fatalf("expected Cyberstan (#260) selected, got %v", app.selectedIDs)
+	}
+	if !app.showCampaignCfg {
+		t.Fatalf("expected campaign config panel auto-expanded for Cyberstan (#260)")
+	}
+
+	// Clicking "开启战役" on Cyberstan (#260) should automatically enable ForceOpen, OpenRegions, InitializeRegions and infer Race=3 (Automatons)
+	if err := tt.Click("开启战役"); err != nil {
+		t.Fatalf("click 开启战役 failed: %v", err)
+	}
+	if !app.draft.Campaign || !app.draft.ForceOpen || !app.draft.OpenRegions || !app.draft.InitializeRegions || app.draft.CampaignRace != 3 {
+		t.Fatalf("expected auto-linked Cyberstan campaign flags (Campaign/ForceOpen/OpenRegions/InitializeRegions/Race=3), got %+v", app.draft)
+	}
+
+	if err := tt.Click("保存并下发到代理"); err != nil {
+		t.Fatalf("click dispatch failed: %v", err)
+	}
+	if len(app.plan.Targets) != 1 || app.plan.Targets[0].Planet != 260 || !app.plan.Targets[0].InitializeRegions {
+		t.Fatalf("expected saved Cyberstan target with InitializeRegions=true, got %+v", app.plan.Targets)
+	}
+}
+
+

@@ -457,22 +457,22 @@ func RewriteStatus(raw []byte, plan config.Plan, ctx *RewriteContext) ([]byte, R
 		}
 	}
 
-	// Region definitions from WarInfo if matching warId + layoutVersion
+	// Region definitions from WarInfo (match warId; tolerate layoutVersion drift as fallback)
 	var regionDefs []any
 	worldMaxHealth := make(map[int]float64)
 	nativeRegionPlanets := make(map[int]bool)
 	if ctx.RegionReference != nil {
 		w1, okW1 := asInt(res["warId"])
 		w2, okW2 := asInt(ctx.RegionReference["warId"])
-		l1, okL1 := asInt(res["layoutVersion"])
-		l2, okL2 := asInt(ctx.RegionReference["layoutVersion"])
-		if okW1 && okW2 && w1 == w2 && (!okL1 || !okL2 || l1 == l2) {
+		if !okW1 || !okW2 || w1 == w2 {
 			if defs, ok := asSlice(ctx.RegionReference["planetRegions"]); ok {
 				regionDefs = defs
 				for _, d := range defs {
 					if dm, ok := asMap(d); ok {
 						if pid, ok := asInt(dm["planetIndex"]); ok {
-							nativeRegionPlanets[pid] = true
+							if mh, okM := asInt(dm["maxHealth"]); !okM || mh > 1 {
+								nativeRegionPlanets[pid] = true
+							}
 						}
 					}
 				}
@@ -491,7 +491,7 @@ func RewriteStatus(raw []byte, plan config.Plan, ctx *RewriteContext) ([]byte, R
 		}
 	}
 
-	// Infer enemy helper
+	// Infer enemy helper (checks original server effects first, matching CPV)
 	inferEnemy := func(t config.PlanetTarget) int {
 		if t.CampaignRace >= 2 && t.CampaignRace <= 4 {
 			return t.CampaignRace
@@ -511,6 +511,15 @@ func RewriteStatus(raw []byte, plan config.Plan, ctx *RewriteContext) ([]byte, R
 		if ow := originalOwner[t.Planet]; ow >= 2 && ow <= 4 {
 			return ow
 		}
+		for _, row := range rawEntries {
+			if em, ok := asMap(row); ok {
+				if pi, _ := asInt(em["index"]); pi == t.Planet {
+					if gid, _ := asInt(em["galacticEffectId"]); nativeEnemyEffects[gid] != 0 {
+						return nativeEnemyEffects[gid]
+					}
+				}
+			}
+		}
 		for _, row := range entries {
 			if em, ok := asMap(row); ok {
 				if pi, _ := asInt(em["index"]); pi == t.Planet {
@@ -523,18 +532,40 @@ func RewriteStatus(raw []byte, plan config.Plan, ctx *RewriteContext) ([]byte, R
 		return 2
 	}
 
-	// Owner & ForceOpen health patches + regions
+	hasCampaignOnPlanet := func(pid int) bool {
+		for _, c := range campaigns {
+			if cm, ok := asMap(c); ok {
+				if pi, _ := asInt(cm["planetIndex"]); pi == pid {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	// Owner & ForceOpen health patches + regions (aligned with CPV war_status_addon.py)
 	for i := range activeTargets {
 		t := &activeTargets[i]
 		pMap := planetByID[t.Planet]
-		if t.ForceOpen && t.CampaignType != 4 {
+		if t.Campaign {
 			race := inferEnemy(*t)
-			if t.CampaignRace == 0 {
+			if t.ForceOpen && t.CampaignType != 4 {
+				t.CampaignRace = race
+				t.Owner = race
+			} else if !hasCampaignOnPlanet(t.Planet) && t.CampaignRace == 0 {
 				t.CampaignRace = race
 			}
-			if t.Owner == 0 {
-				t.Owner = race
+			// Planets with native WarInfo regions (e.g. Cyberstan #260) require
+			// initialized Status.planetRegions entries to spawn playable missions.
+			if (t.CampaignType == 0 || t.CampaignType == 3) && nativeRegionPlanets[t.Planet] {
+				if t.CampaignRace == 0 {
+					t.CampaignRace = race
+				}
+				t.InitializeRegions = true
 			}
+		}
+
+		if t.ForceOpen && t.CampaignType != 4 {
 			if mh, ok := worldMaxHealth[t.Planet]; ok && mh > 1 {
 				if h, okH := asFloat(pMap["health"]); !okH || h <= 0 {
 					pMap["health"] = int64(mh / 2)
@@ -564,6 +595,15 @@ func RewriteStatus(raw []byte, plan config.Plan, ctx *RewriteContext) ([]byte, R
 					res["planetRegions"] = newRegs
 					summary.ChangedCount += patched
 				}
+			}
+		}
+
+		if t.Campaign && t.CampaignType == 3 {
+			race := inferEnemy(*t)
+			regList, _ := asSlice(res["planetRegions"])
+			if !hasUsablePlanetRegion(regList, t.Planet, race) {
+				t.CampaignType = 0
+				summary.Notes = append(summary.Notes, fmt.Sprintf("星球 #%d 无可用城市分区，已自动回退为常规解放", t.Planet))
 			}
 		}
 	}
@@ -699,15 +739,26 @@ func patchPlanetRegions(regions []any, defs []any, t config.PlanetTarget, race i
 			}
 			if pos, exists := posByIdx[ri]; exists {
 				rm := regions[pos].(map[string]any)
-				rm["owner"] = race
-				rm["isAvailable"] = true
+				mod := false
+				if curOw, okOw := asInt(rm["owner"]); !okOw || curOw != race {
+					rm["owner"] = race
+					mod = true
+				}
+				if avail, okAv := rm["isAvailable"].(bool); !okAv || !avail {
+					rm["isAvailable"] = true
+					mod = true
+				}
 				if f, okF := asFloat(rm["availabilityFactor"]); !okF || f <= 0 {
 					rm["availabilityFactor"] = 1
+					mod = true
 				}
 				if h, okH := asFloat(rm["health"]); !okH || h <= 0 || h > float64(mh) {
 					rm["health"] = mh / 2
+					mod = true
 				}
-				changed++
+				if mod {
+					changed++
+				}
 			} else {
 				posByIdx[ri] = len(regions)
 				regions = append(regions, map[string]any{
@@ -742,6 +793,26 @@ func patchPlanetRegions(regions []any, defs []any, t config.PlanetTarget, race i
 		}
 	}
 	return changed, regions
+}
+
+func hasUsablePlanetRegion(regions []any, planetID, race int) bool {
+	for _, row := range regions {
+		rm, ok := asMap(row)
+		if !ok {
+			continue
+		}
+		pi, okP := asInt(rm["planetIndex"])
+		_, okR := asInt(rm["regionIndex"])
+		ow, okOw := asInt(rm["owner"])
+		avail, okAv := rm["isAvailable"].(bool)
+		health, okH := asFloat(rm["health"])
+		factor, okF := asFloat(rm["availabilityFactor"])
+		if okP && okR && okOw && okAv && okH && okF &&
+			pi == planetID && ow == race && avail && health > 0 && factor > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func applyDefense(res map[string]any, t config.PlanetTarget, campaign map[string]any, states map[int]DefenseState, planetByID map[int]map[string]any) error {

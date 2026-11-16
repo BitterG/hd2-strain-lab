@@ -72,13 +72,36 @@ type Planet struct {
 	CampaignRace   int     `json:"campaign_race"`
 	CampaignCount  int     `json:"campaign_count"`
 	IsDefense      bool    `json:"is_defense"`
-	EventHealth    float64 `json:"event_health"`
-	EventMaxHealth float64 `json:"event_max_health"`
-	Waypoints      []int   `json:"waypoints"`
-	Hidden        bool    `json:"hidden"`
-	InGloom       bool    `json:"in_gloom"`
-	InTCS         bool    `json:"in_tcs"`
-	Unlisted      bool    `json:"unlisted"`
+	EventHealth      float64 `json:"event_health"`
+	EventMaxHealth   float64 `json:"event_max_health"`
+	Waypoints        []int   `json:"waypoints"`
+	HasNativeRegions bool    `json:"has_native_regions"`
+	Hidden           bool    `json:"hidden"`
+	InGloom          bool    `json:"in_gloom"`
+	InTCS            bool    `json:"in_tcs"`
+	Unlisted         bool    `json:"unlisted"`
+}
+
+// InferEnemyRace returns the planet's active or native enemy faction (2=Terminids, 3=Automatons, 4=Illuminate).
+func (p *Planet) InferEnemyRace() int {
+	if p == nil {
+		return FactionTerminids
+	}
+	if p.CampaignRace >= 2 && p.CampaignRace <= 4 {
+		return p.CampaignRace
+	}
+	if p.Owner >= 2 && p.Owner <= 4 {
+		return p.Owner
+	}
+	for _, eid := range p.ActiveEffects {
+		if eid == 1361 {
+			return FactionAutomatons
+		}
+	}
+	if p.InitialOwner >= 2 && p.InitialOwner <= 4 {
+		return p.InitialOwner
+	}
+	return FactionTerminids
 }
 
 func (p *Planet) DisplayName() string {
@@ -206,6 +229,11 @@ type warInfoJSON struct {
 		Disabled     bool    `json:"disabled"`
 		InitialOwner int     `json:"initialOwner"`
 	} `json:"planetInfos"`
+	PlanetRegions []struct {
+		PlanetIndex int     `json:"planetIndex"`
+		RegionIndex int     `json:"regionIndex"`
+		MaxHealth   float64 `json:"maxHealth"`
+	} `json:"planetRegions"`
 }
 
 type statusJSON struct {
@@ -360,6 +388,13 @@ func buildGalaxyData(warInfoRaw, statusRaw []byte, sourceNote string) (*GalaxyDa
 		}
 		g.PlanetsByID[p.ID] = p
 	}
+	for _, reg := range wi.PlanetRegions {
+		if reg.MaxHealth > 1 {
+			if p, ok := g.PlanetsByID[reg.PlanetIndex]; ok {
+				p.HasNativeRegions = true
+			}
+		}
+	}
 
 	// Merge waypoints.json edges as supplement
 	for kStr, targets := range wp.Waypoints {
@@ -401,6 +436,18 @@ func (g *GalaxyData) ApplyWarData(warInfoRaw, statusRaw []byte, sourceNote strin
 					if info.Position.X != 0 || info.Position.Y != 0 || info.Index == 0 {
 						p.X = info.Position.X
 						p.Y = info.Position.Y
+					}
+				}
+			}
+			if len(wi.PlanetRegions) > 0 {
+				for _, p := range g.PlanetsByID {
+					p.HasNativeRegions = false
+				}
+				for _, reg := range wi.PlanetRegions {
+					if reg.MaxHealth > 1 {
+						if p, ok := g.PlanetsByID[reg.PlanetIndex]; ok {
+							p.HasNativeRegions = true
+						}
 					}
 				}
 			}

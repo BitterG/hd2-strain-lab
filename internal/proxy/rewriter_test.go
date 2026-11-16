@@ -274,3 +274,120 @@ func TestRewriteStatusDisableSpaceStationEffects(t *testing.T) {
 		t.Fatalf("expected spaceStations empty when #1217 disabled, got %v", ss2)
 	}
 }
+
+func TestRewriteStatusCyberstanRegionsAndLayoutVersionDrift(t *testing.T) {
+	// Simulate live War 801 Status with bumped layoutVersion (727 vs WarInfo's 724)
+	// and empty planetRegions for Cyberstan (#260).
+	liveStatus := []byte(`{
+		"warId": 801,
+		"time": 86400000,
+		"layoutVersion": 727,
+		"planetStatus": [
+			{"index": 260, "owner": 3, "health": 15000000, "regenPerSecond": 277.77, "players": 5},
+			{"index": 227, "owner": 1, "health": 0, "regenPerSecond": 0, "players": 0}
+		],
+		"planetActiveEffects": [
+			{"index": 260, "galacticEffectId": 1360},
+			{"index": 260, "galacticEffectId": 1361},
+			{"index": 260, "galacticEffectId": 1246}
+		],
+		"planetRegions": [],
+		"campaigns": []
+	}`)
+
+	warInfoDoc, err := decodeJSONObject(assets.WarInfoJSON)
+	if err != nil {
+		t.Fatalf("decode WarInfoJSON failed: %v", err)
+	}
+
+	ctx := &RewriteContext{
+		AllowAllEffects: true,
+		RegionReference: warInfoDoc,
+		CampaignIDs:     make(map[int]int),
+		DefenseStates:   make(map[int]DefenseState),
+	}
+
+	// Even if user only sets ForceOpen + CampaignType=3 (or InitializeRegions=true with auto-inferred race),
+	// Cyberstan (#260) must get all 8 native regions initialized and owner=3, race=3.
+	plan := config.Plan{
+		Schema: 2,
+		Targets: []config.PlanetTarget{
+			{
+				Planet:        260,
+				Enabled:       true,
+				Effects:       []int{1203, 1357, 1355, 1359, 1249},
+				Campaign:      true,
+				ForceOpen:     true,
+				CampaignType:  3,
+				CampaignRace:  0, // Auto-infer -> 3 (Automatons)
+				CampaignCount: 20,
+				OpenRegions:   true,
+			},
+			{
+				// Planet 227 has no native regions in WarInfo -> CampaignType 3 should fall back to 0
+				Planet:       227,
+				Enabled:      true,
+				ForceOpen:    true,
+				CampaignType: 3,
+				CampaignRace: 3,
+			},
+		},
+	}
+
+	out, summary, err := RewriteStatus(liveStatus, plan, ctx)
+	if err != nil {
+		t.Fatalf("RewriteStatus Cyberstan failed: %v", err)
+	}
+	if summary.ChangedCount == 0 {
+		t.Fatalf("expected non-zero changes")
+	}
+
+	var doc map[string]any
+	if err := json.Unmarshal(out, &doc); err != nil {
+		t.Fatalf("unmarshal output failed: %v", err)
+	}
+
+	// Verify 8 Cyberstan regions are populated and available
+	regs, _ := doc["planetRegions"].([]any)
+	cyberRegs := 0
+	for _, r := range regs {
+		rm := r.(map[string]any)
+		if int(rm["planetIndex"].(float64)) == 260 {
+			cyberRegs++
+			if int(rm["owner"].(float64)) != 3 {
+				t.Fatalf("expected Cyberstan region owner=3, got %v", rm["owner"])
+			}
+			if rm["isAvailable"] != true {
+				t.Fatalf("expected Cyberstan region isAvailable=true, got %v", rm["isAvailable"])
+			}
+			if rm["health"].(float64) <= 0 {
+				t.Fatalf("expected Cyberstan region health > 0, got %v", rm["health"])
+			}
+		}
+	}
+	if cyberRegs != 8 {
+		t.Fatalf("expected 8 initialized regions for Cyberstan (#260), got %d", cyberRegs)
+	}
+
+	// Verify campaigns for 260 (type=3, race=3) and 227 (fallback type=0, race=3)
+	camps, _ := doc["campaigns"].([]any)
+	if len(camps) != 2 {
+		t.Fatalf("expected 2 campaigns, got %d", len(camps))
+	}
+	for _, c := range camps {
+		cm := c.(map[string]any)
+		pid := int(cm["planetIndex"].(float64))
+		ctype := int(cm["type"].(float64))
+		crace := int(cm["race"].(float64))
+		switch pid {
+		case 260:
+			if ctype != 3 || crace != 3 {
+				t.Fatalf("expected Cyberstan campaign type=3 race=3, got type=%d race=%d", ctype, crace)
+			}
+		case 227:
+			if ctype != 0 || crace != 3 {
+				t.Fatalf("expected planet 227 fallback campaign type=0 race=3, got type=%d race=%d", ctype, crace)
+			}
+		}
+	}
+}

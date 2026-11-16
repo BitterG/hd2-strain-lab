@@ -2,7 +2,7 @@
   "name": "HD2 Strain Lab · 绝地潜兵 2 星球变种工坊",
   "slug": "hd2-strain-lab",
   "identifier": "io.github.bitterg.hd2strainlab",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "icon": "resources/icon.png",
   "main": "."
 }
