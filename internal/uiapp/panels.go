@@ -142,8 +142,35 @@ func (a *App) buildVariantTab(c *ui.Context) {
 		return
 	}
 
+	_, winH := c.Size()
+	compact := winH > 0 && winH/a.fontScale() < 500
+	if compact {
+		a.buildSelectedSummaryCard(c)
+		ui.Scroll(c.Key("variant-compact-scroll")).Grow(1).FillWidth().KeepScrollbars(true).Children(func() {
+			ui.Column(c).FillWidth().Gap(10).Children(func() {
+				a.buildEffectsInspectorCard(c)
+				a.buildCampaignConfigCard(c)
+				a.buildEffectPickerCard(c, true)
+				a.buildVariantFooter(c)
+			})
+		})
+		return
+	}
+
+	a.buildSelectedSummaryCard(c)
+	ui.Scroll(c.Key("variant-upper-scroll")).FillWidth().MinHeight(80 * a.panelScale(0.95, 1.15)).KeepScrollbars(true).Children(func() {
+		ui.Column(c).FillWidth().Gap(10).Children(func() {
+			a.buildEffectsInspectorCard(c)
+			a.buildCampaignConfigCard(c)
+		})
+	})
+	a.buildEffectPickerCard(c, false)
+	a.buildVariantFooter(c)
+}
+
+func (a *App) buildSelectedSummaryCard(c *ui.Context) {
 	// Summary header of selected planet(s)
-	ui.Column(c).Padding(10).Gap(6).Radius(8).Background(BgCard).Border(1, CyanActive.Alpha(0.45)).Children(func() {
+	ui.Column(c).Shrink(0).Padding(10).Gap(6).Radius(8).Background(BgCard).Border(1, CyanActive.Alpha(0.45)).Children(func() {
 		if len(a.selectedIDs) == 1 {
 			pid := a.selectedIDs[0]
 			pl := a.galaxy.PlanetsByID[pid]
@@ -225,7 +252,9 @@ func (a *App) buildVariantTab(c *ui.Context) {
 			}
 		})
 	})
+}
 
+func (a *App) buildEffectsInspectorCard(c *ui.Context) {
 	// Native Effects & Added Custom Effects Inspector
 	nativeEffects := a.selectedNativeEffects()
 	disSet := make(map[int]bool, len(a.draft.DisabledNativeEffects))
@@ -233,7 +262,7 @@ func (a *App) buildVariantTab(c *ui.Context) {
 		disSet[eid] = true
 	}
 
-	ui.Column(c).Padding(9).Gap(6).Radius(8).Background(BgCard).Border(1, BorderSub).Children(func() {
+	ui.Column(c).Shrink(0).Padding(9).Gap(6).Radius(8).Background(BgCard).Border(1, BorderSub).Children(func() {
 		// 1) Native Effects on the planet
 		ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
 			ui.Textf(c, "原版自带效果 (%d)", len(nativeEffects)).FontSize(a.fs(12)).Bold().TextColor(ColorHumans)
@@ -308,9 +337,11 @@ func (a *App) buildVariantTab(c *ui.Context) {
 			})
 		}
 	})
+}
 
+func (a *App) buildCampaignConfigCard(c *ui.Context) {
 	// Campaign & Owner Settings (collapsible card)
-	ui.Column(c).Padding(9).Gap(7).Radius(8).Background(BgCard).Border(1, BorderSub).Children(func() {
+	ui.Column(c).Shrink(0).Padding(9).Gap(7).Radius(8).Background(BgCard).Border(1, BorderSub).Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
 			hdrLbl := "▶ 战役与归属参数（展开）"
 			if a.showCampaignCfg {
@@ -471,10 +502,23 @@ func (a *App) buildVariantTab(c *ui.Context) {
 			})
 		}
 	})
+}
 
+func (a *App) buildEffectPickerCard(c *ui.Context, compact bool) {
 	// Effect Catalog Picker
-	ui.Column(c).Grow(1).Padding(10).Gap(6).Radius(8).Background(BgCard).Border(1, BorderSub).Children(func() {
-		ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
+	_, winH := c.Size()
+	picker := ui.Column(c.Key("eff-picker-card")).Clip().Padding(10).Gap(6).Radius(8).Background(BgCard).Border(1, BorderSub)
+	if compact {
+		picker.Shrink(0)
+	} else {
+		minPickerH := float32(290) * a.panelScale(1.0, 1.25)
+		if winH > 0 {
+			minPickerH = min(minPickerH, max(float32(240), winH*0.43))
+		}
+		picker.Grow(1).MinHeight(minPickerH)
+	}
+	picker.Children(func() {
+		ui.Row(c).Shrink(0).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
 			ui.Textf(c, "星系效果与变种 (%d 已选)", len(a.draft.Effects)).FontSize(a.fs(12.5)).Bold().TextColor(HD2Gold)
 			if len(a.draft.Effects) > 0 {
 				if ui.Button(c.Key("clr-eff"), "清空效果").Clicked() {
@@ -483,11 +527,11 @@ func (a *App) buildVariantTab(c *ui.Context) {
 			}
 		})
 
-		ui.SearchField(c.Key("eff-search"), &a.effectQuery).Placeholder("搜索效果中文 / 英文 / ID").FillWidth()
+		ui.SearchField(c.Key("eff-search"), &a.effectQuery).Placeholder("搜索效果中文 / 英文 / ID").FillWidth().Shrink(0)
 
 		// Group filter chips
 		groups := []string{"全部", "仅已选", "敌情与变种", "作战增减益", "临时配发战备", "弹药与补给", "星球环境与通路", "空间站与战术行动", "设施与星球标记"}
-		ui.Row(c).Wrap().Gap(4).Children(func() {
+		ui.Row(c).Shrink(0).Wrap().Gap(4).Children(func() {
 			for _, g := range groups {
 				active := a.effectGroup == g
 				chip := ui.Box(c.Key("eg-" + g)).Padding(2, 7).Radius(999).Cursor(ui.CursorPointer)
@@ -515,8 +559,13 @@ func (a *App) buildVariantTab(c *ui.Context) {
 			selEff[eid] = true
 		}
 
-		ui.List(c.Key("eff-list"), &a.effectListState, len(effList)).Grow(1).FillWidth().
-			ItemKey(func(i int) any { return effList[i].ID }).
+		list := ui.List(c.Key("eff-list"), &a.effectListState, len(effList)).FillWidth().KeepScrollbars(true)
+		if compact {
+			list.Height(240 * a.panelScale(1.0, 1.30))
+		} else {
+			list.Grow(1).MinHeight(96 * a.panelScale(1.0, 1.25))
+		}
+		list.ItemKey(func(i int) any { return effList[i].ID }).
 			Rows(func(row ui.ListRow) {
 				eff := effList[row.Index]
 				checked := selEff[eff.ID]
@@ -553,9 +602,11 @@ func (a *App) buildVariantTab(c *ui.Context) {
 				}
 			})
 	})
+}
 
+func (a *App) buildVariantFooter(c *ui.Context) {
 	// Compact footer showing total configured planets
-	ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Padding(2, 4).Children(func() {
+	ui.Row(c).Shrink(0).AlignItems(ui.Center).Justify(ui.SpaceBetween).Padding(2, 4).Children(func() {
 		ui.Textf(c, "总方案: %d 颗星球", len(a.plan.Targets)).FontSize(a.fs(11)).TextColor(TextDim)
 		if len(a.plan.Targets) > 0 {
 			if ui.Button(c.Key("view-all-cfg"), "查看全部已配置").Clicked() {

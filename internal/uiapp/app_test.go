@@ -405,4 +405,97 @@ func TestUIViewCyberstanAutoRegionSetup(t *testing.T) {
 	}
 }
 
+func TestUIViewEditedPlanetEffectPickerRemainsVisible(t *testing.T) {
+	cases := []struct {
+		name      string
+		w, h      int
+		fontScale float64
+		numEffs   int
+		defense   bool
+	}{
+		{"standard_many_effects_defense", 1380, 860, 1.0, 12, true},
+		{"1080p_125dpi_edited", 1280, 760, 1.0, 6, false},
+		{"1080p_150dpi_min_window", 1080, 680, 1.0, 4, false},
+		{"large_font_130pct", 1380, 860, 1.30, 6, false},
+		{"1080p_150dpi_font_125pct", 1080, 680, 1.25, 5, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HD2_STRAIN_LAB_PROFILE", t.TempDir())
+			app, err := NewApp()
+			if err != nil {
+				t.Fatalf("NewApp failed: %v", err)
+			}
+			defer app.stopProxy()
+			app.setFontScale(tc.fontScale)
+
+			var effs []int
+			for i := 0; i < tc.numEffs && i < len(app.galaxy.Effects); i++ {
+				effs = append(effs, app.galaxy.Effects[i].ID)
+			}
+			tgt := config.DefaultTarget(126) // Turing (#126) also has native effects
+			tgt.Effects = effs
+			tgt.Campaign = true
+			tgt.ForceOpen = true
+			if tc.defense {
+				tgt.CampaignType = 4
+				tgt.Owner = 1
+				tgt.CampaignRace = 2
+				tgt.DefenseSource = 1
+			}
+			app.plan.Targets = []config.PlanetTarget{tgt}
+
+			tt := ui.NewTester(app.View, tc.w, tc.h)
+			app.handleMapSelect(126, 0)
+			tt.Frame()
+
+			firstEff := app.galaxy.Effects[0]
+			rEff, okEff := tt.Find(firstEff.Name)
+			if !okEff || rEff.W <= 0 || rEff.H <= 0 {
+				t.Fatalf("expected effect row %q visible in picker, got ok=%v rect=%+v", firstEff.Name, okEff, rEff)
+			}
+			rFooter, okFooter := tt.Find("查看全部已配置")
+			if !okFooter {
+				t.Fatalf("expected footer button visible")
+			}
+			if rEff.Y+rEff.H > rFooter.Y {
+				t.Fatalf("effect row (%+v) overlaps or overflows past footer (%+v)", rEff, rFooter)
+			}
+			// Verify clicking an effect row in the picker actually works
+			if err := tt.Click(firstEff.Name); err != nil {
+				t.Fatalf("clicking effect %q in picker failed: %v", firstEff.Name, err)
+			}
+			if len(app.draft.Effects) != tc.numEffs-1 {
+				t.Fatalf("expected toggling effect to update draft effects to %d, got %d", tc.numEffs-1, len(app.draft.Effects))
+			}
+		})
+	}
+
+	// Verify selecting a variants-only configured planet auto-collapses campaign config
+	t.Run("variants_only_target_collapses_campaign_cfg", func(t *testing.T) {
+		t.Setenv("HD2_STRAIN_LAB_PROFILE", t.TempDir())
+		app, err := NewApp()
+		if err != nil {
+			t.Fatalf("NewApp failed: %v", err)
+		}
+		defer app.stopProxy()
+
+		tgt := config.DefaultTarget(78)
+		tgt.Effects = []int{app.galaxy.Effects[0].ID}
+		app.plan.Targets = []config.PlanetTarget{tgt}
+
+		_ = ui.NewTester(app.View, 1380, 860)
+		app.handleMapSelect(1, 0) // unconfigured inactive planet -> expands
+		if !app.showCampaignCfg {
+			t.Fatalf("expected showCampaignCfg=true for unconfigured inactive planet")
+		}
+		app.handleMapSelect(78, 0) // configured variants-only planet -> collapses
+		if app.showCampaignCfg {
+			t.Fatalf("expected showCampaignCfg=false for variants-only configured planet")
+		}
+	})
+}
+
+
 

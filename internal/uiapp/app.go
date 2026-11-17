@@ -302,11 +302,13 @@ func (a *App) anySelectedConfigured() bool {
 }
 
 func (a *App) syncDraftFromSelection() {
+	isConfigured := false
 	if len(a.selectedIDs) == 0 {
 		a.draft = config.DefaultTarget(0)
 	} else {
 		tm := a.targetMap()
 		if existing, ok := tm[a.selectedIDs[0]]; ok {
+			isConfigured = true
 			a.draft = existing
 			a.draft.Effects = append([]int(nil), existing.Effects...)
 			a.draft.DisabledNativeEffects = append([]int(nil), existing.DisabledNativeEffects...)
@@ -334,8 +336,13 @@ func (a *App) syncDraftFromSelection() {
 	}
 	a.draftDefCountF = float64(a.draft.DefenseCount)
 	if len(a.selectedIDs) > 0 {
-		if pl := a.galaxy.PlanetsByID[a.selectedIDs[0]]; pl != nil && (!pl.HasCampaign || pl.HasNativeRegions) {
-			a.showCampaignCfg = true
+		pl := a.galaxy.PlanetsByID[a.selectedIDs[0]]
+		if isConfigured {
+			a.showCampaignCfg = a.draft.Campaign || a.draft.ForceOpen ||
+				a.draft.OpenRegions || a.draft.InitializeRegions ||
+				a.draft.Owner != 0 || a.draft.CampaignType != 0
+		} else {
+			a.showCampaignCfg = pl != nil && (!pl.HasCampaign || pl.HasNativeRegions)
 		}
 	}
 }
