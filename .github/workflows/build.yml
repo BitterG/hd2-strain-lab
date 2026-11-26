@@ -55,7 +55,7 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      - name: Publish rolling Release (nightly)
+      - name: Publish rolling Latest Release
         if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -66,7 +66,7 @@ jobs:
           $buildTime = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss 'UTC'")
           $recentCommits = (git log -n 10 --pretty=format:"- %h %s") -join "`n"
           @"
-          Rolling pre-release built automatically from ``main``.
+          Rolling release built automatically from ``main``.
 
           - **Commit**: ``${{ github.sha }}`` ($shortSha)
           - **Built**: $buildTime
@@ -87,15 +87,16 @@ jobs:
 
           if ($exists) {
             gh release edit nightly `
-              --title "HD2 Strain Lab Nightly (Rolling)" `
+              --title "HD2 Strain Lab Latest (Rolling)" `
               --notes-file .\nightly_notes.md `
-              --prerelease
+              --prerelease=false `
+              --latest
             gh release upload nightly .\hd2-strain-lab.exe .\SHA256SUMS.txt --clobber
           } else {
             gh release create nightly `
-              --title "HD2 Strain Lab Nightly (Rolling)" `
+              --title "HD2 Strain Lab Latest (Rolling)" `
               --notes-file .\nightly_notes.md `
-              --prerelease `
+              --latest `
               .\hd2-strain-lab.exe `
               .\SHA256SUMS.txt
           }
