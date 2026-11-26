@@ -39,6 +39,7 @@ type Stats struct {
 	Requests          int
 	StatusHits        int
 	Rewrites          int
+	EffectsRewrites   int
 	CatalogCount      int
 	WarID             int
 	LastMessage       string
@@ -63,8 +64,9 @@ type Server struct {
 	rwCtx    *RewriteContext
 	stats    Stats
 
-	onUpdate     func()
-	onLiveStatus func(raw []byte)
+	onUpdate      func()
+	onLiveStatus  func(raw []byte)
+	onLiveEffects func(raw []byte)
 
 	lastWarInfoAttempt map[[2]int]time.Time
 
@@ -110,11 +112,25 @@ func (s *Server) SeedWarData(warID int, warInfoPlain, effectsPlain []byte) {
 	}
 }
 
+// SetOnLiveEffects registers an optional callback invoked with raw /GalacticWarEffects payloads.
+func (s *Server) SetOnLiveEffects(fn func(raw []byte)) {
+	s.mu.Lock()
+	s.onLiveEffects = fn
+	s.mu.Unlock()
+}
+
 func (s *Server) UpdatePlan(plan config.Plan) {
 	s.mu.Lock()
 	s.plan = plan
+	var extras []string
 	if len(plan.DisabledGlobalEffects) > 0 {
-		s.stats.LastMessage = fmt.Sprintf("配置已更新（%d 颗启用星球，%d 项全局取消效果），等待游戏下次刷新战况", countEnabled(plan), len(plan.DisabledGlobalEffects))
+		extras = append(extras, fmt.Sprintf("%d 项全局取消效果", len(plan.DisabledGlobalEffects)))
+	}
+	if len(plan.EffectValueOverrides) > 0 {
+		extras = append(extras, fmt.Sprintf("%d 项自定义数值覆盖", len(plan.EffectValueOverrides)))
+	}
+	if len(extras) > 0 {
+		s.stats.LastMessage = fmt.Sprintf("配置已更新（%d 颗启用星球，%s），等待游戏下次刷新", countEnabled(plan), strings.Join(extras, "，"))
 	} else {
 		s.stats.LastMessage = fmt.Sprintf("配置已更新（%d 颗启用星球），等待游戏下次刷新战况", countEnabled(plan))
 	}
@@ -469,6 +485,26 @@ func (s *Server) handleTargetMITM(clientConn net.Conn, br *bufio.Reader) {
 				switch {
 				case isEffects:
 					s.handleObservedEffects(plain)
+					s.mu.RLock()
+					cb := s.onLiveEffects
+					s.mu.RUnlock()
+					if cb != nil {
+						cb(plain)
+					}
+					patched, changed := s.handleEffectsRewrite(plain)
+					if changed {
+						outBody = patched
+						rebuilt = true
+						if wasGz {
+							resp.Header.Del("Content-Encoding")
+						}
+						resp.Header.Del("ETag")
+						resp.Header.Del("Content-MD5")
+						resp.Header.Del("Digest")
+						resp.Header.Del("Transfer-Encoding")
+						resp.Header.Set("Content-Length", strconv.Itoa(len(outBody)))
+						resp.ContentLength = int64(len(outBody))
+					}
 				case isWarInfo:
 					if m := warInfoPathRe.FindStringSubmatch(path); len(m) == 2 {
 						wid, _ := strconv.Atoi(m[1])
@@ -545,6 +581,33 @@ func (s *Server) handleObservedEffects(plain []byte) {
 	s.appendLogLocked(s.stats.LastMessage)
 	s.mu.Unlock()
 	s.notify()
+}
+
+func (s *Server) handleEffectsRewrite(plain []byte) ([]byte, bool) {
+	s.mu.RLock()
+	plan := s.plan
+	s.mu.RUnlock()
+
+	if len(plan.EffectValueOverrides) == 0 {
+		return plain, false
+	}
+	patched, changed, err := RewriteEffects(plain, plan)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err != nil {
+		s.stats.LastMessage = "效果数值改写跳过: " + err.Error()
+		s.appendLogLocked(s.stats.LastMessage)
+		go s.notify()
+		return plain, false
+	}
+	if changed > 0 {
+		s.stats.EffectsRewrites++
+		s.stats.LastMessage = fmt.Sprintf("已改写 GalacticWarEffects 数值（%d 项覆盖，需启动/重启游戏生效）", changed)
+		s.appendLogLocked(s.stats.LastMessage)
+		go s.notify()
+		return patched, true
+	}
+	return plain, false
 }
 
 func (s *Server) handleObservedWarInfo(warID int, plain []byte) {

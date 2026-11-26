@@ -82,8 +82,9 @@ type App struct {
 	draftDefHoursF float64
 	draftDefCountF float64
 
-	copySourceID  int
-	copyEffectIDs []int
+	copySourceID        int
+	copyEffectIDs       []int
+	valueOverrideInputs map[int]float64
 
 	refreshing bool
 	toastMsg   string
@@ -115,18 +116,19 @@ func NewApp() (*App, error) {
 	}
 
 	app := &App{
-		theme:         NewHD2Theme(),
-		profileDir:    profileDir,
-		galaxy:        galaxy,
-		plan:          plan,
-		settings:      settings,
-		certsMgr:      cm,
-		starMap:       NewStarMapState(),
-		leftSidebarW:  float32(config.NormalizeSidebarWidth(settings.LeftSidebarWidth, config.DefaultLeftSidebarWidth)),
-		rightSidebarW: float32(config.NormalizeSidebarWidth(settings.RightSidebarWidth, config.DefaultRightSidebarWidth)),
-		panelSides:    panelSides,
-		showPlanetNav: true,
-		effectGroup:   "全部",
+		theme:               NewHD2Theme(),
+		profileDir:          profileDir,
+		galaxy:              galaxy,
+		plan:                plan,
+		settings:            settings,
+		certsMgr:            cm,
+		starMap:             NewStarMapState(),
+		leftSidebarW:        float32(config.NormalizeSidebarWidth(settings.LeftSidebarWidth, config.DefaultLeftSidebarWidth)),
+		rightSidebarW:       float32(config.NormalizeSidebarWidth(settings.RightSidebarWidth, config.DefaultRightSidebarWidth)),
+		panelSides:          panelSides,
+		showPlanetNav:       true,
+		effectGroup:         "全部",
+		valueOverrideInputs: make(map[int]float64),
 	}
 	app.theme.FontSize = app.fs(13)
 
@@ -140,6 +142,14 @@ func NewApp() (*App, error) {
 		if app.win != nil {
 			app.win.Update(func() {
 				_ = app.galaxy.ApplyStatusBytes(cp, "游戏代理实时战况")
+			})
+		}
+	})
+	app.proxySrv.SetOnLiveEffects(func(raw []byte) {
+		cp := append([]byte(nil), raw...)
+		if app.win != nil {
+			app.win.Update(func() {
+				_ = app.galaxy.ApplyEffectsBytes(cp)
 			})
 		}
 	})
@@ -445,6 +455,9 @@ func (a *App) triggerLiveRefresh() {
 			if applyErr := a.galaxy.ApplyWarData(warInfoRaw, statusRaw, "官方实时战况 "+time.Now().Format("15:04:05")); applyErr != nil {
 				a.toastMsg = applyErr.Error()
 			} else {
+				if len(effectsRaw) > 0 {
+					_ = a.galaxy.ApplyEffectsBytes(effectsRaw)
+				}
 				a.proxySrv.SeedWarData(a.galaxy.WarID, warInfoRaw, effectsRaw)
 				a.toastMsg = "已同步最新银河战况"
 			}
@@ -601,6 +614,57 @@ func (a *App) disableAllGlobalEffects(ids []int) error {
 func (a *App) restoreAllGlobalEffects() error {
 	a.plan.DisabledGlobalEffects = nil
 	return a.saveAndDispatch()
+}
+
+func (a *App) setEffectValueOverride(eid, val int) error {
+	if a.plan.EffectValueOverrides == nil {
+		a.plan.EffectValueOverrides = make(map[int]int)
+	}
+	a.plan.EffectValueOverrides[eid] = val
+	return a.saveAndDispatch()
+}
+
+func (a *App) clearEffectValueOverride(eid int) error {
+	if a.plan.EffectValueOverrides != nil {
+		delete(a.plan.EffectValueOverrides, eid)
+		if len(a.plan.EffectValueOverrides) == 0 {
+			a.plan.EffectValueOverrides = nil
+		}
+	}
+	if a.valueOverrideInputs != nil {
+		delete(a.valueOverrideInputs, eid)
+	}
+	return a.saveAndDispatch()
+}
+
+func (a *App) clearAllEffectValueOverrides() error {
+	a.plan.EffectValueOverrides = nil
+	if a.valueOverrideInputs != nil {
+		clear(a.valueOverrideInputs)
+	}
+	return a.saveAndDispatch()
+}
+
+func (a *App) editableNumericEffectsForSelection() []int {
+	seen := make(map[int]bool)
+	var out []int
+	add := func(eid int) {
+		if seen[eid] {
+			return
+		}
+		if _, ok := a.galaxy.EffectValueSpec(eid); ok {
+			seen[eid] = true
+			out = append(out, eid)
+		}
+	}
+	for _, eid := range a.draft.Effects {
+		add(eid)
+	}
+	for _, eid := range a.selectedNativeEffects() {
+		add(eid)
+	}
+	slices.Sort(out)
+	return out
 }
 
 func (a *App) effectDisplayName(eid int) string {
@@ -765,15 +829,26 @@ func (a *App) commitTargetMap(tm map[int]config.PlanetTarget) error {
 	slices.SortFunc(nextTargets, func(x, y config.PlanetTarget) int {
 		return x.Planet - y.Planet
 	})
+	var clonedOverrides map[int]int
+	if len(a.plan.EffectValueOverrides) > 0 {
+		clonedOverrides = make(map[int]int, len(a.plan.EffectValueOverrides))
+		for k, v := range a.plan.EffectValueOverrides {
+			clonedOverrides[k] = v
+		}
+	}
 	candidate := config.Plan{
 		Schema:                2,
 		Targets:               nextTargets,
 		DisabledGlobalEffects: append([]int(nil), a.plan.DisabledGlobalEffects...),
+		EffectValueOverrides:  clonedOverrides,
 	}
 	if _, err := config.NormalizeTargets(candidate); err != nil {
 		return err
 	}
 	if _, err := config.NormalizeDisabledGlobalEffects(candidate); err != nil {
+		return err
+	}
+	if _, err := config.NormalizeEffectValueOverrides(candidate); err != nil {
 		return err
 	}
 	a.plan = candidate
@@ -827,6 +902,9 @@ func (a *App) saveAndDispatch() error {
 	if _, err := config.NormalizeDisabledGlobalEffects(a.plan); err != nil {
 		return err
 	}
+	if _, err := config.NormalizeEffectValueOverrides(a.plan); err != nil {
+		return err
+	}
 	if err := config.SavePlan(a.profileDir, a.plan); err != nil {
 		return err
 	}
@@ -857,7 +935,13 @@ func (a *App) importPlanBytes(raw []byte) error {
 	if _, err := config.NormalizeDisabledGlobalEffects(p); err != nil {
 		return err
 	}
+	if _, err := config.NormalizeEffectValueOverrides(p); err != nil {
+		return err
+	}
 	a.plan = p
+	if a.valueOverrideInputs != nil {
+		clear(a.valueOverrideInputs)
+	}
 	a.syncDraftFromSelection()
 	return a.saveAndDispatch()
 }

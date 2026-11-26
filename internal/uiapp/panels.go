@@ -305,6 +305,9 @@ func (a *App) buildVariantTab(c *ui.Context) {
 		if len(a.galaxy.GlobalEffects) > 0 || len(a.plan.DisabledGlobalEffects) > 0 {
 			a.buildGlobalEffectsCard(c)
 		}
+		if len(a.plan.EffectValueOverrides) > 0 {
+			a.buildGlobalValueOverridesCard(c)
+		}
 		a.buildConfiguredList(c)
 		return
 	}
@@ -634,6 +637,124 @@ func (a *App) buildEffectsInspectorCard(c *ui.Context) {
 				}
 			})
 		}
+
+		if editable := a.editableNumericEffectsForSelection(); len(editable) > 0 {
+			ui.Divider(c)
+			hasAnyOv := false
+			for _, eid := range editable {
+				if _, ok := a.plan.EffectValueOverrides[eid]; ok {
+					hasAnyOv = true
+					break
+				}
+			}
+			ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
+				ui.Text(c, "实验：自定义数值覆盖（重启游戏生效）").FontSize(a.fs(11.5)).Bold().TextColor(HD2Gold)
+				if hasAnyOv || len(a.plan.EffectValueOverrides) > 0 {
+					if ui.Button(c.Key("clr-val-ov"), "清空覆盖").Clicked() {
+						if err := a.clearAllEffectValueOverrides(); err != nil {
+							c.Toast(err.Error())
+						} else {
+							c.Toast("已清空全部自定义数值覆盖")
+						}
+					}
+				}
+			})
+			ui.Text(c, "改写 /GalacticWarEffects 数值，需在启动前配置或重启游戏生效，建议仅单人/私房测试。").FontSize(a.fs(10)).TextColor(TextDim)
+
+			ui.Column(c).Gap(6).Children(func() {
+				for _, eid := range editable {
+					spec, ok := a.galaxy.EffectValueSpec(eid)
+					if !ok {
+						continue
+					}
+					ov, hasOv := a.plan.EffectValueOverrides[eid]
+					val := float64(spec.Default)
+					if hasOv {
+						val = float64(ov)
+						a.valueOverrideInputs[eid] = val
+					} else if cur, okIn := a.valueOverrideInputs[eid]; okIn {
+						val = cur
+					}
+
+					meta := fmt.Sprintf("原版 %d%s", spec.Default, spec.Unit)
+					if !spec.HasLive {
+						meta = fmt.Sprintf("单位 %s", spec.Unit)
+					}
+					if hasOv {
+						meta += fmt.Sprintf(" · 已覆盖 %d%s", ov, spec.Unit)
+					}
+
+					ui.Column(c).Padding(6, 8).Gap(4).Radius(6).Background(BgMid).Border(1, BorderSub).Children(func() {
+						ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Gap(6).Children(func() {
+							ui.Textf(c, "%s #%d", a.effectDisplayName(eid), eid).FontSize(a.fs(10.5)).TextColor(TextPrimary).Grow(1)
+							ui.Text(c, meta).FontSize(a.fs(10)).TextColor(TextDim)
+						})
+						ui.Row(c).AlignItems(ui.Center).Gap(6).Children(func() {
+							if ui.NumberInput(c.Key(fmt.Sprintf("val-ov-%d", eid)), &val, spec.Min, spec.Max, spec.Step).Grow(1).Changed() {
+								a.valueOverrideInputs[eid] = val
+								if err := a.setEffectValueOverride(eid, int(math.Round(val))); err != nil {
+									c.Toast(err.Error())
+								}
+							}
+							ui.Text(c, spec.Unit).FontSize(a.fs(10.5)).TextColor(TextDim)
+							if hasOv {
+								if ui.Button(c.Key(fmt.Sprintf("rst-ov-%d", eid)), "恢复").Clicked() {
+									if err := a.clearEffectValueOverride(eid); err != nil {
+										c.Toast(err.Error())
+									} else {
+										c.Toast(fmt.Sprintf("已恢复 #%d 官方原版数值", eid))
+									}
+								}
+							}
+						})
+					})
+				}
+			})
+		}
+	})
+}
+
+func (a *App) buildGlobalValueOverridesCard(c *ui.Context) {
+	ids := make([]int, 0, len(a.plan.EffectValueOverrides))
+	for eid := range a.plan.EffectValueOverrides {
+		ids = append(ids, eid)
+	}
+	slices.Sort(ids)
+
+	ui.Column(c).Shrink(0).Padding(10).Gap(6).Radius(8).Background(BgCard).Border(1, HD2Gold.Alpha(0.45)).Children(func() {
+		ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
+			ui.Textf(c, "实验：自定义数值覆盖 (%d)", len(ids)).FontSize(a.fs(12)).Bold().TextColor(HD2Gold)
+			if ui.Button(c.Key("clr-all-ov-unsel"), "清空全部").Clicked() {
+				if err := a.clearAllEffectValueOverrides(); err != nil {
+					c.Toast(err.Error())
+				} else {
+					c.Toast("已清空全部自定义数值覆盖")
+				}
+			}
+		})
+		ui.Text(c, "将在代理拦截 /GalacticWarEffects 时改写下方数值，重启游戏生效。").FontSize(a.fs(10)).TextColor(TextDim)
+		ui.Row(c).Wrap().Gap(4).Children(func() {
+			for _, eid := range ids {
+				ov := a.plan.EffectValueOverrides[eid]
+				unit := ""
+				if spec, ok := a.galaxy.EffectValueSpec(eid); ok {
+					unit = spec.Unit
+				}
+				chip := ui.Row(c.Key(fmt.Sprintf("g-ov-%d", eid))).Padding(3, 7).Gap(5).AlignItems(ui.Center).
+					Radius(999).Background(HD2GoldDim).Border(1, HD2Gold.Alpha(0.7)).Cursor(ui.CursorPointer)
+				chip.Children(func() {
+					ui.Textf(c, "%s #%d → %d%s", a.effectDisplayName(eid), eid, ov, unit).FontSize(a.fs(10.5)).TextColor(HD2Gold)
+					ui.Text(c, "恢复").FontSize(a.fs(10)).Bold().TextColor(TextPrimary)
+				})
+				if chip.Clicked() {
+					if err := a.clearEffectValueOverride(eid); err != nil {
+						c.Toast(err.Error())
+					} else {
+						c.Toast(fmt.Sprintf("已恢复 #%d 官方原版数值", eid))
+					}
+				}
+			}
+		})
 	})
 }
 
@@ -1016,9 +1137,10 @@ func (a *App) buildProxyTab(c *ui.Context) {
 					}
 				})
 
-				ui.Row(c).Gap(12).Children(func() {
+				ui.Row(c).Wrap().Gap(10).Children(func() {
 					ui.Textf(c, "战况命中: %d", st.StatusHits).FontSize(a.fs(11)).TextColor(TextDim)
 					ui.Textf(c, "改写下发: %d", st.Rewrites).FontSize(a.fs(11)).TextColor(CyanActive)
+					ui.Textf(c, "数值改写: %d", st.EffectsRewrites).FontSize(a.fs(11)).TextColor(HD2Gold)
 					ui.Textf(c, "目录数: %d", st.CatalogCount).FontSize(a.fs(11)).TextColor(TextDim)
 				})
 			})

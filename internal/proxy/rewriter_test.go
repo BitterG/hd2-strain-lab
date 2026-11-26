@@ -543,3 +543,79 @@ func TestRewriteStatusCyberstanRegionsAndLayoutVersionDrift(t *testing.T) {
 		}
 	}
 }
+
+func TestRewriteEffectsCustomValuesAndSafety(t *testing.T) {
+	sampleArray := []byte(`[
+		{"id": 1191, "effectType": 72, "valueTypes": [13, 2], "values": [769209189, 0]},
+		{"id": 1135, "effectType": 36, "valueTypes": [4, 2], "values": [295440526, -90]},
+		{"id": 1182, "effectType": 21, "valueTypes": [3, 1], "values": [0, -90]},
+		{"id": 1258, "effectType": 69, "valueTypes": [1, 0], "values": [-1, 0]},
+		{"id": 1245, "effectType": 71, "valueTypes": [16, 0], "values": [3923464812, 0]},
+		{"id": 1159, "effectType": 59, "valueTypes": [10, 0], "values": [3068507239, 0]}
+	]`)
+
+	plan := config.Plan{
+		Schema: 2,
+		EffectValueOverrides: map[int]int{
+			1191: 500,   // type=72 slot 1 -> 500
+			1135: -999,  // type=36 percent slot 1 -> clamped to -99
+			1182: -60,   // type=21 slot 1 -> -60
+			1258: 10,    // type=69 slot 0 -> 10
+			1245: 12345, // type=71 forbidden -> untouched
+			1159: 999,   // type=59 forbidden -> untouched
+		},
+	}
+
+	out, changed, err := RewriteEffects(sampleArray, plan)
+	if err != nil {
+		t.Fatalf("RewriteEffects array failed: %v", err)
+	}
+	if changed != 4 {
+		t.Fatalf("expected 4 safe overrides applied, got %d", changed)
+	}
+
+	var rows []map[string]any
+	if err := json.Unmarshal(out, &rows); err != nil {
+		t.Fatal(err)
+	}
+	byID := make(map[int]map[string]any, len(rows))
+	for _, r := range rows {
+		byID[int(r["id"].(float64))] = r
+	}
+	if got := int(byID[1191]["values"].([]any)[1].(float64)); got != 500 {
+		t.Fatalf("expected #1191 values[1]=500, got %d", got)
+	}
+	if got := int(byID[1191]["values"].([]any)[0].(float64)); got != 769209189 {
+		t.Fatalf("expected #1191 entity hash preserved, got %d", got)
+	}
+	if got := int(byID[1135]["values"].([]any)[1].(float64)); got != -99 {
+		t.Fatalf("expected #1135 percent clamped to -99, got %d", got)
+	}
+	if got := int(byID[1182]["values"].([]any)[1].(float64)); got != -60 {
+		t.Fatalf("expected #1182 values[1]=-60, got %d", got)
+	}
+	if got := int(byID[1258]["values"].([]any)[0].(float64)); got != 10 {
+		t.Fatalf("expected #1258 values[0]=10, got %d", got)
+	}
+	if got := int(byID[1245]["values"].([]any)[0].(float64)); got != 3923464812 {
+		t.Fatalf("expected forbidden #1245 untouched, got %d", got)
+	}
+	if got := int(byID[1159]["values"].([]any)[0].(float64)); got != 3068507239 {
+		t.Fatalf("expected forbidden #1159 untouched, got %d", got)
+	}
+
+	// Also verify wrapped {"galacticEffects": [...]} format
+	wrapped := []byte(`{"galacticEffects":[{"id":1191,"effectType":72,"valueTypes":[13,2],"values":[769209189,0]}]}`)
+	outW, chW, err := RewriteEffects(wrapped, config.Plan{Schema: 2, EffectValueOverrides: map[int]int{1191: 250}})
+	if err != nil || chW != 1 {
+		t.Fatalf("RewriteEffects wrapped failed: ch=%d err=%v", chW, err)
+	}
+	var docW map[string]any
+	if err := json.Unmarshal(outW, &docW); err != nil {
+		t.Fatal(err)
+	}
+	ge0 := docW["galacticEffects"].([]any)[0].(map[string]any)
+	if got := int(ge0["values"].([]any)[1].(float64)); got != 250 {
+		t.Fatalf("expected wrapped #1191 values[1]=250, got %d", got)
+	}
+}

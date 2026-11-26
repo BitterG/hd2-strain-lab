@@ -799,5 +799,77 @@ func TestUIViewDragPanelBetweenLeftAndRightSidebars(t *testing.T) {
 	}
 }
 
+func TestUIViewCustomEffectValueOverrideAndPersistence(t *testing.T) {
+	prof := t.TempDir()
+	t.Setenv("HD2_STRAIN_LAB_PROFILE", prof)
+
+	app, err := NewApp()
+	if err != nil {
+		t.Fatalf("NewApp failed: %v", err)
+	}
+	defer app.stopProxy()
+
+	// Seed live values for #1191 (0%)
+	if err := app.galaxy.ApplyEffectsBytes([]byte(`[{"id":1191,"effectType":72,"valueTypes":[13,2],"values":[769209189,0]}]`)); err != nil {
+		t.Fatalf("ApplyEffectsBytes failed: %v", err)
+	}
+
+	tt := ui.NewTester(app.View, 1380, 860)
+
+	// Select planet #1 and add #1191 via "兵种激增" filter
+	if err := tt.Click("克伦达斯II"); err != nil {
+		t.Fatalf("click planet #1 failed: %v", err)
+	}
+	if err := tt.Click("兵种激增"); err != nil {
+		t.Fatalf("click 兵种激增 failed: %v", err)
+	}
+	if err := tt.Click("穿刺虫激增 (+0% 生成)"); err != nil {
+		t.Fatalf("click #1191 failed: %v", err)
+	}
+
+	if !tt.HasText("实验：自定义数值覆盖（重启游戏生效）") || !tt.HasText("原版 0%") {
+		t.Fatalf("expected custom value override section and #1191 live default visible, texts=%v", tt.Texts())
+	}
+
+	// Step value via NumberInput "+" button (0 -> 25)
+	if err := tt.Click("+"); err != nil {
+		t.Fatalf("click NumberInput + failed: %v", err)
+	}
+	if got := app.plan.EffectValueOverrides[1191]; got != 25 {
+		t.Fatalf("expected EffectValueOverrides[1191]=25 after +, got %d", got)
+	}
+
+	// Set override to 500 and save target via commitTargetMap ("保存并下发到代理")
+	if err := app.setEffectValueOverride(1191, 500); err != nil {
+		t.Fatalf("setEffectValueOverride failed: %v", err)
+	}
+	tt.Frame()
+	if !tt.HasText("已覆盖 500%") {
+		t.Fatalf("expected override badge 500%% visible")
+	}
+	if err := tt.Click("保存并下发到代理"); err != nil {
+		t.Fatalf("dispatch failed: %v", err)
+	}
+	if got := app.plan.EffectValueOverrides[1191]; got != 500 {
+		t.Fatalf("expected EffectValueOverrides[1191]=500 preserved across commitTargetMap, got %d", got)
+	}
+
+	loaded, err := config.LoadPlan(prof)
+	if err != nil {
+		t.Fatalf("LoadPlan failed: %v", err)
+	}
+	if loaded.EffectValueOverrides[1191] != 500 {
+		t.Fatalf("expected persisted EffectValueOverrides[1191]=500, got %+v", loaded.EffectValueOverrides)
+	}
+
+	// Click "恢复" to clear override
+	if err := tt.Click("恢复"); err != nil {
+		t.Fatalf("click 恢复 failed: %v", err)
+	}
+	if len(app.plan.EffectValueOverrides) != 0 {
+		t.Fatalf("expected EffectValueOverrides cleared, got %+v", app.plan.EffectValueOverrides)
+	}
+}
+
 
 

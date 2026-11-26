@@ -62,6 +62,7 @@ type Plan struct {
 	Schema                int            `json:"schema"`
 	Targets               []PlanetTarget `json:"targets"`
 	DisabledGlobalEffects []int          `json:"disabled_global_effects,omitempty"`
+	EffectValueOverrides  map[int]int    `json:"effect_value_overrides,omitempty"`
 }
 
 const (
@@ -367,6 +368,30 @@ func NormalizeDisabledGlobalEffects(plan Plan) ([]int, error) {
 		}
 	}
 	slices.Sort(out)
+	return out, nil
+}
+
+// NormalizeEffectValueOverrides validates and clones custom GalacticWarEffects value overrides.
+func NormalizeEffectValueOverrides(plan Plan) (map[int]int, error) {
+	if plan.Schema != 0 && plan.Schema != 2 {
+		return nil, fmt.Errorf("不支持的方案版本: %d", plan.Schema)
+	}
+	if len(plan.EffectValueOverrides) > 64 {
+		return nil, errors.New("自定义效果数值覆盖过多")
+	}
+	if len(plan.EffectValueOverrides) == 0 {
+		return nil, nil
+	}
+	out := make(map[int]int, len(plan.EffectValueOverrides))
+	for eid, val := range plan.EffectValueOverrides {
+		if eid <= 0 {
+			return nil, fmt.Errorf("自定义数值覆盖包含无效效果 ID: %d", eid)
+		}
+		if val < -10000 || val > 100000 {
+			return nil, fmt.Errorf("效果 #%d 自定义数值超出允许范围: %d", eid, val)
+		}
+		out[eid] = val
+	}
 	return out, nil
 }
 

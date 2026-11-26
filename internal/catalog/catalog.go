@@ -165,20 +165,155 @@ type SectorInfo struct {
 }
 
 type GalaxyData struct {
-	WarID          int
-	StatusTime     float64
-	Planets        []*Planet
-	PlanetsByID    map[int]*Planet
-	Edges          []Edge
-	BattleRoutes   []BattleRoute
-	Sectors        []*SectorInfo
-	SectorsByName  map[string]*SectorInfo
-	Effects        []Effect
-	EffectsByID    map[int]Effect
-	GlobalEffects  []int
-	GroupLabels    []string // Ordered group labels for effect picker
-	LastUpdatedAt  time.Time
-	LiveSourceNote string
+	WarID                int
+	StatusTime           float64
+	Planets              []*Planet
+	PlanetsByID          map[int]*Planet
+	Edges                []Edge
+	BattleRoutes         []BattleRoute
+	Sectors              []*SectorInfo
+	SectorsByName        map[string]*SectorInfo
+	Effects              []Effect
+	EffectsByID          map[int]Effect
+	LiveEffectValues     map[int][2]int
+	LiveEffectValueTypes map[int][2]int
+	GlobalEffects        []int
+	GroupLabels          []string // Ordered group labels for effect picker
+	LastUpdatedAt        time.Time
+	LiveSourceNote       string
+}
+
+// EffectValueSpec describes an editable numerical parameter for a safe GalacticWarEffects entry.
+type EffectValueSpec struct {
+	Slot    int
+	Unit    string
+	Min     float64
+	Max     float64
+	Step    float64
+	Default int
+	HasLive bool
+}
+
+// EffectValueRule returns the editable value slot, unit, and bounds for safe numeric effectTypes.
+func EffectValueRule(effectType, valueType int) (slot int, unit string, minV, maxV, step float64, ok bool) {
+	switch effectType {
+	case 21: // Extraction time
+		return 1, "秒", -120, 300, 5, true
+	case 23: // Eagle rearm time
+		if valueType == 1 {
+			return 0, "秒", -120, 300, 5, true
+		}
+		return 0, "%", -95, 300, 5, true
+	case 24: // Vehicle fuel
+		return 0, "%", -95, 500, 10, true
+	case 25: // Starting ammo
+		return 0, "%", -90, 500, 10, true
+	case 36: // Stratagem cooldown
+		if valueType == 2 {
+			return 1, "%", -99, 500, 5, true
+		}
+		return 1, "秒", -300, 600, 10, true
+	case 56: // Ammo pickups
+		if valueType == 1 {
+			return 0, "弹匣", -5, 20, 1, true
+		}
+		return 0, "%", -90, 500, 10, true
+	case 61, 63, 80: // Stims
+		return 0, "支", -4, 20, 1, true
+	case 69: // Reinforcements
+		return 0, "次", -10, 50, 1, true
+	case 72: // Enemy spawn rate
+		return 1, "%", -100, 5000, 25, true
+	default:
+		return 0, "", 0, 0, 0, false
+	}
+}
+
+// EffectValueSpec returns the editable numerical specification for eid if it is a safe numeric effect.
+func (g *GalaxyData) EffectValueSpec(eid int) (EffectValueSpec, bool) {
+	if g == nil {
+		return EffectValueSpec{}, false
+	}
+	eff, ok := g.EffectsByID[eid]
+	if !ok {
+		return EffectValueSpec{}, false
+	}
+	slot, _, _, _, _, ok := EffectValueRule(eff.EffectType, 0)
+	if !ok {
+		return EffectValueSpec{}, false
+	}
+	valType := 0
+	if vt, hasVT := g.LiveEffectValueTypes[eid]; hasVT {
+		valType = vt[slot]
+	} else if strings.Contains(eff.Name, "%") {
+		valType = 2
+	} else {
+		valType = 1
+	}
+	slot, unit, minV, maxV, step, ok := EffectValueRule(eff.EffectType, valType)
+	if !ok {
+		return EffectValueSpec{}, false
+	}
+	spec := EffectValueSpec{
+		Slot: slot,
+		Unit: unit,
+		Min:  minV,
+		Max:  maxV,
+		Step: step,
+	}
+	if vals, hasV := g.LiveEffectValues[eid]; hasV {
+		spec.Default = vals[slot]
+		spec.HasLive = true
+	}
+	return spec, true
+}
+
+// ApplyEffectsBytes parses live /api/WarSeason/GalacticWarEffects payloads and caches effect values/valueTypes.
+func (g *GalaxyData) ApplyEffectsBytes(effectsRaw []byte) error {
+	if g == nil || len(effectsRaw) == 0 {
+		return nil
+	}
+	type rawEffectRow struct {
+		ID         int       `json:"id"`
+		Values     []float64 `json:"values"`
+		ValueTypes []int     `json:"valueTypes"`
+	}
+	var rows []rawEffectRow
+	trimmed := strings.TrimSpace(string(effectsRaw))
+	if strings.HasPrefix(trimmed, "[") {
+		if err := json.Unmarshal(effectsRaw, &rows); err != nil {
+			return err
+		}
+	} else {
+		var wrapper struct {
+			GalacticEffects []rawEffectRow `json:"galacticEffects"`
+		}
+		if err := json.Unmarshal(effectsRaw, &wrapper); err != nil {
+			return err
+		}
+		rows = wrapper.GalacticEffects
+	}
+	if g.LiveEffectValues == nil {
+		g.LiveEffectValues = make(map[int][2]int, len(rows))
+	}
+	if g.LiveEffectValueTypes == nil {
+		g.LiveEffectValueTypes = make(map[int][2]int, len(rows))
+	}
+	for _, row := range rows {
+		if row.ID <= 0 {
+			continue
+		}
+		var vals, vts [2]int
+		for i := 0; i < 2 && i < len(row.Values); i++ {
+			vals[i] = int(math.Round(row.Values[i]))
+		}
+		for i := 0; i < 2 && i < len(row.ValueTypes); i++ {
+			vts[i] = row.ValueTypes[i]
+		}
+		g.LiveEffectValues[row.ID] = vals
+		g.LiveEffectValueTypes[row.ID] = vts
+	}
+	return nil
 }
 
 // IsGlobalEffect reports whether eid is currently active as a galaxy-wide globalEvent effect.
@@ -321,14 +456,16 @@ func buildGalaxyData(warInfoRaw, statusRaw []byte, sourceNote string) (*GalaxyDa
 	}
 
 	g := &GalaxyData{
-		WarID:          st.WarID,
-		StatusTime:     st.Time,
-		PlanetsByID:    make(map[int]*Planet),
-		SectorsByName:  make(map[string]*SectorInfo),
-		Effects:        wc.Effects,
-		EffectsByID:    make(map[int]Effect, len(wc.Effects)),
-		LastUpdatedAt:  time.Now(),
-		LiveSourceNote: sourceNote,
+		WarID:                st.WarID,
+		StatusTime:           st.Time,
+		PlanetsByID:          make(map[int]*Planet),
+		SectorsByName:        make(map[string]*SectorInfo),
+		Effects:              wc.Effects,
+		EffectsByID:          make(map[int]Effect, len(wc.Effects)),
+		LiveEffectValues:     make(map[int][2]int, len(wc.Effects)),
+		LiveEffectValueTypes: make(map[int][2]int, len(wc.Effects)),
+		LastUpdatedAt:        time.Now(),
+		LiveSourceNote:       sourceNote,
 	}
 	if g.WarID == 0 {
 		g.WarID = wi.WarID

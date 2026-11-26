@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 
+	"hd2-strain-lab/internal/catalog"
 	"hd2-strain-lab/internal/config"
 )
 
@@ -997,4 +998,87 @@ func containsInt(list []int, target int) bool {
 		}
 	}
 	return false
+}
+
+// RewriteEffects mutates safe numerical values inside a /GalacticWarEffects payload according to plan.EffectValueOverrides.
+func RewriteEffects(raw []byte, plan config.Plan) ([]byte, int, error) {
+	overrides, err := config.NormalizeEffectValueOverrides(plan)
+	if err != nil || len(overrides) == 0 {
+		return raw, 0, err
+	}
+
+	doc, err := decodeJSONAny(raw)
+	if err != nil {
+		return raw, 0, fmt.Errorf("效果目录 JSON 解析失败: %w", err)
+	}
+	copied := deepCopyJSON(doc)
+	var rows []any
+	isWrapped := false
+	if m, ok := asMap(copied); ok {
+		rows, _ = asSlice(m["galacticEffects"])
+		isWrapped = true
+	} else {
+		rows, _ = asSlice(copied)
+	}
+	if len(rows) == 0 {
+		return raw, 0, nil
+	}
+
+	changed := 0
+	for _, r := range rows {
+		rm, ok := asMap(r)
+		if !ok {
+			continue
+		}
+		eid, okID := asInt(rm["id"])
+		if !okID {
+			continue
+		}
+		newVal, wantOverride := overrides[eid]
+		if !wantOverride {
+			continue
+		}
+		effectType, okET := asInt(rm["effectType"])
+		if !okET {
+			continue
+		}
+		slot, _, minV, maxV, _, allowed := catalog.EffectValueRule(effectType, 0)
+		if !allowed {
+			continue
+		}
+		vals, okVals := asSlice(rm["values"])
+		if !okVals || len(vals) <= slot {
+			continue
+		}
+		if vts, okVTs := asSlice(rm["valueTypes"]); okVTs && len(vts) > slot {
+			if vt, okVT := asInt(vts[slot]); okVT {
+				_, _, minV, maxV, _, allowed = catalog.EffectValueRule(effectType, vt)
+				if !allowed {
+					continue
+				}
+			}
+		}
+		if newVal < int(minV) {
+			newVal = int(minV)
+		}
+		if newVal > int(maxV) {
+			newVal = int(maxV)
+		}
+		vals[slot] = newVal
+		rm["values"] = vals
+		changed++
+	}
+	if changed == 0 {
+		return raw, 0, nil
+	}
+	var outBytes []byte
+	if isWrapped {
+		outBytes, err = json.Marshal(copied)
+	} else {
+		outBytes, err = json.Marshal(rows)
+	}
+	if err != nil {
+		return raw, 0, err
+	}
+	return outBytes, changed, nil
 }

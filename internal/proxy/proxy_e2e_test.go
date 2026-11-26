@@ -178,3 +178,81 @@ func hasPlanetEffect(doc map[string]any, planetID, effectID int) bool {
 	}
 	return false
 }
+
+func TestProxyE2EGalacticWarEffectsRewrite(t *testing.T) {
+	profileDir := t.TempDir()
+	cm, err := certs.NewManager(profileDir)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	upCert, upPool := makeUpstreamTestCert(t)
+	upstream := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/WarSeason/GalacticWarEffects" {
+			_, _ = w.Write([]byte(`[{"id":1191,"effectType":72,"valueTypes":[13,2],"values":[769209189,0]}]`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	upstream.TLS = &tls.Config{Certificates: []tls.Certificate{upCert}}
+	upstream.StartTLS()
+	defer upstream.Close()
+
+	plan := config.Plan{
+		Schema:               2,
+		EffectValueOverrides: map[int]int{1191: 500},
+	}
+
+	srv := NewServer(cm, plan, config.DefaultSettings(), nil, nil)
+	srv.testUpstreamAddr = strings.TrimPrefix(upstream.URL, "https://")
+	srv.testRootCAs = upPool
+
+	var observedRaw []byte
+	srv.SetOnLiveEffects(func(raw []byte) {
+		observedRaw = append([]byte(nil), raw...)
+	})
+
+	port, err := srv.Start()
+	if err != nil {
+		t.Fatalf("proxy Start failed: %v", err)
+	}
+	defer srv.Stop()
+
+	caBytes, err := os.ReadFile(cm.CACertPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientPool := x509.NewCertPool()
+	clientPool.AppendCertsFromPEM(caBytes)
+
+	proxyURL, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy:           http.ProxyURL(proxyURL),
+			TLSClientConfig: &tls.Config{RootCAs: clientPool},
+		},
+		Timeout: 10 * time.Second,
+	}
+
+	resp, err := client.Get("https://" + certs.TargetHost + "/api/WarSeason/GalacticWarEffects")
+	if err != nil {
+		t.Fatalf("GET GalacticWarEffects failed: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+
+	var rows []map[string]any
+	if err := json.Unmarshal(body, &rows); err != nil {
+		t.Fatalf("invalid rewritten GalacticWarEffects JSON: %v", err)
+	}
+	if len(rows) != 1 || int(rows[0]["values"].([]any)[1].(float64)) != 500 {
+		t.Fatalf("expected rewritten values[1]=500, got %s", string(body))
+	}
+	if srv.Stats().EffectsRewrites != 1 {
+		t.Fatalf("expected EffectsRewrites=1, got %d", srv.Stats().EffectsRewrites)
+	}
+	if !strings.Contains(string(observedRaw), ",0]") {
+		t.Fatalf("expected onLiveEffects callback to receive original upstream values, got %s", string(observedRaw))
+	}
+}
