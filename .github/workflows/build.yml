@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-windows:
@@ -23,6 +23,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 10
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -52,3 +54,48 @@ jobs:
             SHA256SUMS.txt
           retention-days: 30
           if-no-files-found: error
+
+      - name: Publish rolling Release (nightly)
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $shortSha = "${{ github.sha }}".Substring(0, 7)
+          $buildTime = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss 'UTC'")
+          $recentCommits = (git log -n 10 --pretty=format:"- %h %s") -join "`n"
+          @"
+          Rolling pre-release built automatically from ``main``.
+
+          - **Commit**: ``${{ github.sha }}`` ($shortSha)
+          - **Built**: $buildTime
+
+          ### Recent Commits
+          $recentCommits
+          "@ | Set-Content -Path .\nightly_notes.md -Encoding utf8
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f nightly
+          git push -f origin refs/tags/nightly
+
+          $ErrorActionPreference = "Continue"
+          gh release view nightly *> $null
+          $exists = ($LASTEXITCODE -eq 0)
+          $ErrorActionPreference = "Stop"
+
+          if ($exists) {
+            gh release edit nightly `
+              --title "HD2 Strain Lab Nightly (Rolling)" `
+              --notes-file .\nightly_notes.md `
+              --prerelease
+            gh release upload nightly .\hd2-strain-lab.exe .\SHA256SUMS.txt --clobber
+          } else {
+            gh release create nightly `
+              --title "HD2 Strain Lab Nightly (Rolling)" `
+              --notes-file .\nightly_notes.md `
+              --prerelease `
+              .\hd2-strain-lab.exe `
+              .\SHA256SUMS.txt
+          }
