@@ -175,9 +175,15 @@ type GalaxyData struct {
 	SectorsByName  map[string]*SectorInfo
 	Effects        []Effect
 	EffectsByID    map[int]Effect
+	GlobalEffects  []int
 	GroupLabels    []string // Ordered group labels for effect picker
 	LastUpdatedAt  time.Time
 	LiveSourceNote string
+}
+
+// IsGlobalEffect reports whether eid is currently active as a galaxy-wide globalEvent effect.
+func (g *GalaxyData) IsGlobalEffect(eid int) bool {
+	return g != nil && slices.Contains(g.GlobalEffects, eid)
 }
 
 type warCatalogFile struct {
@@ -274,9 +280,10 @@ type statusJSON struct {
 		GalacticEffectID int `json:"galacticEffectId"`
 	} `json:"planetActiveEffects"`
 	GlobalEvents []struct {
-		EventID       int   `json:"eventId"`
-		EffectIDs     []int `json:"effectIds"`
-		PlanetIndices []int `json:"planetIndices"`
+		EventID       int     `json:"eventId"`
+		EffectIDs     []int   `json:"effectIds"`
+		PlanetIndices []int   `json:"planetIndices"`
+		ExpireTime    float64 `json:"expireTime"`
 	} `json:"globalEvents"`
 	SpaceStations []struct {
 		ID32            uint32 `json:"id32"`
@@ -482,6 +489,7 @@ func (g *GalaxyData) applyStatusStruct(st *statusJSON, sourceNote string) {
 	}
 
 	// Reset dynamic fields
+	g.GlobalEffects = g.GlobalEffects[:0]
 	for _, p := range g.PlanetsByID {
 		p.ActiveEffects = p.ActiveEffects[:0]
 		p.HasCampaign = false
@@ -537,7 +545,21 @@ func (g *GalaxyData) applyStatusStruct(st *statusJSON, sourceNote string) {
 		addPlanetEffect(ae.Index, ae.GalacticEffectID)
 	}
 	for _, ge := range st.GlobalEvents {
-		if len(ge.PlanetIndices) == 0 || len(ge.EffectIDs) == 0 {
+		if len(ge.EffectIDs) == 0 {
+			continue
+		}
+		if ge.ExpireTime > 0 && st.Time > 0 && ge.ExpireTime <= st.Time {
+			continue
+		}
+		if len(ge.PlanetIndices) == 0 {
+			for _, eid := range ge.EffectIDs {
+				if !slices.Contains(g.GlobalEffects, eid) {
+					g.GlobalEffects = append(g.GlobalEffects, eid)
+				}
+				for pid := range g.PlanetsByID {
+					addPlanetEffect(pid, eid)
+				}
+			}
 			continue
 		}
 		for _, pid := range ge.PlanetIndices {
@@ -546,6 +568,7 @@ func (g *GalaxyData) applyStatusStruct(st *statusJSON, sourceNote string) {
 			}
 		}
 	}
+	slices.Sort(g.GlobalEffects)
 	for _, ss := range st.SpaceStations {
 		if ss.Flags == 0 && len(ss.ActiveEffectIDs) == 0 {
 			continue

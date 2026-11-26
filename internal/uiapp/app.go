@@ -34,6 +34,7 @@ type App struct {
 	selectedIDs []int
 
 	// Left navigator state
+	showPlanetNav   bool
 	planetQuery     string
 	planetFilter    int
 	planetListState ui.ListState
@@ -83,14 +84,15 @@ func NewApp() (*App, error) {
 	}
 
 	app := &App{
-		theme:       NewHD2Theme(),
-		profileDir:  profileDir,
-		galaxy:      galaxy,
-		plan:        plan,
-		settings:    settings,
-		certsMgr:    cm,
-		starMap:     NewStarMapState(),
-		effectGroup: "全部",
+		theme:         NewHD2Theme(),
+		profileDir:    profileDir,
+		galaxy:        galaxy,
+		plan:          plan,
+		settings:      settings,
+		certsMgr:      cm,
+		starMap:       NewStarMapState(),
+		showPlanetNav: true,
+		effectGroup:   "全部",
 	}
 	app.theme.FontSize = app.fs(13)
 
@@ -405,6 +407,35 @@ func (a *App) restoreAllNativeEffects() {
 	a.draft.DisabledNativeEffects = nil
 }
 
+func (a *App) isGlobalEffectDisabled(eid int) bool {
+	return slices.Contains(a.plan.DisabledGlobalEffects, eid)
+}
+
+func (a *App) toggleDisableGlobalEffect(eid int) error {
+	if idx := slices.Index(a.plan.DisabledGlobalEffects, eid); idx >= 0 {
+		a.plan.DisabledGlobalEffects = slices.Delete(a.plan.DisabledGlobalEffects, idx, idx+1)
+	} else {
+		a.plan.DisabledGlobalEffects = append(a.plan.DisabledGlobalEffects, eid)
+	}
+	slices.Sort(a.plan.DisabledGlobalEffects)
+	return a.saveAndDispatch()
+}
+
+func (a *App) disableAllGlobalEffects(ids []int) error {
+	for _, eid := range ids {
+		if !slices.Contains(a.plan.DisabledGlobalEffects, eid) {
+			a.plan.DisabledGlobalEffects = append(a.plan.DisabledGlobalEffects, eid)
+		}
+	}
+	slices.Sort(a.plan.DisabledGlobalEffects)
+	return a.saveAndDispatch()
+}
+
+func (a *App) restoreAllGlobalEffects() error {
+	a.plan.DisabledGlobalEffects = nil
+	return a.saveAndDispatch()
+}
+
 func (a *App) effectDisplayName(eid int) string {
 	if eff, ok := a.galaxy.EffectsByID[eid]; ok && eff.Name != "" {
 		return eff.Name
@@ -430,8 +461,11 @@ func (a *App) selectedNativeEffects() []int {
 }
 
 func (a *App) currentEffectiveEffects() []int {
-	dis := make(map[int]bool, len(a.draft.DisabledNativeEffects))
+	dis := make(map[int]bool, len(a.draft.DisabledNativeEffects)+len(a.plan.DisabledGlobalEffects))
 	for _, eid := range a.draft.DisabledNativeEffects {
+		dis[eid] = true
+	}
+	for _, eid := range a.plan.DisabledGlobalEffects {
 		dis[eid] = true
 	}
 	seen := make(map[int]bool)
@@ -496,10 +530,16 @@ func (a *App) applyCopyEffectsTo(pid int) error {
 	}
 	tgt.Enabled = true
 
+	globalDis := make(map[int]bool, len(a.plan.DisabledGlobalEffects))
+	for _, eid := range a.plan.DisabledGlobalEffects {
+		globalDis[eid] = true
+	}
 	destNative := make(map[int]bool)
 	if pl := a.galaxy.PlanetsByID[pid]; pl != nil {
 		for _, eid := range pl.ActiveEffects {
-			destNative[eid] = true
+			if !globalDis[eid] {
+				destNative[eid] = true
+			}
 		}
 	}
 	copiedSet := make(map[int]bool, len(effs))
@@ -558,8 +598,15 @@ func (a *App) commitTargetMap(tm map[int]config.PlanetTarget) error {
 	slices.SortFunc(nextTargets, func(x, y config.PlanetTarget) int {
 		return x.Planet - y.Planet
 	})
-	candidate := config.Plan{Schema: 2, Targets: nextTargets}
+	candidate := config.Plan{
+		Schema:                2,
+		Targets:               nextTargets,
+		DisabledGlobalEffects: append([]int(nil), a.plan.DisabledGlobalEffects...),
+	}
 	if _, err := config.NormalizeTargets(candidate); err != nil {
+		return err
+	}
+	if _, err := config.NormalizeDisabledGlobalEffects(candidate); err != nil {
 		return err
 	}
 	a.plan = candidate
@@ -610,6 +657,9 @@ func (a *App) saveAndDispatch() error {
 	if _, err := config.NormalizeTargets(a.plan); err != nil {
 		return err
 	}
+	if _, err := config.NormalizeDisabledGlobalEffects(a.plan); err != nil {
+		return err
+	}
 	if err := config.SavePlan(a.profileDir, a.plan); err != nil {
 		return err
 	}
@@ -635,6 +685,9 @@ func (a *App) importPlanBytes(raw []byte) error {
 		}
 	}
 	if _, err := config.NormalizeTargets(p); err != nil {
+		return err
+	}
+	if _, err := config.NormalizeDisabledGlobalEffects(p); err != nil {
 		return err
 	}
 	a.plan = p

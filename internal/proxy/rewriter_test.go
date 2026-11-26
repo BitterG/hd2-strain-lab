@@ -207,6 +207,158 @@ func TestRewriteStatusDisableGlobalEventEffects(t *testing.T) {
 	}
 }
 
+func TestRewriteStatusDisableGalaxyWideGlobalEventPerPlanet(t *testing.T) {
+	raw := []byte(`{
+		"warId": 801,
+		"time": 87746480,
+		"planetStatus": [
+			{"index": 78, "owner": 2, "health": 500000},
+			{"index": 126, "owner": 1, "health": 1000000}
+		],
+		"planetActiveEffects": [],
+		"campaigns": [],
+		"globalEvents": [
+			{"eventId": 1501121, "effectIds": [1194], "planetIndices": [], "expireTime": 87885416}
+		]
+	}`)
+	plan := config.Plan{
+		Schema: 2,
+		Targets: []config.PlanetTarget{
+			{
+				Planet:                78,
+				Enabled:               true,
+				DisabledNativeEffects: []int{1194},
+			},
+		},
+	}
+	ctx := &RewriteContext{
+		AllowAllEffects: true,
+		CampaignIDs:     make(map[int]int),
+		DefenseStates:   make(map[int]DefenseState),
+	}
+	out, summary, err := RewriteStatus(raw, plan, ctx)
+	if err != nil {
+		t.Fatalf("RewriteStatus failed: %v", err)
+	}
+	if summary.EffectsRemoved != 1 || summary.ChangedCount == 0 {
+		t.Fatalf("expected 1 effect removed, got %+v", summary)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(out, &doc); err != nil {
+		t.Fatal(err)
+	}
+	ge0 := doc["globalEvents"].([]any)[0].(map[string]any)
+	effIDs := ge0["effectIds"].([]any)
+	if len(effIDs) != 0 {
+		t.Fatalf("expected 1194 stripped from globalEvents[0].effectIds, got %v", effIDs)
+	}
+	if hasPlanetEffect(doc, 78, 1194) {
+		t.Fatalf("expected planet 78 NOT to have 1194")
+	}
+	if !hasPlanetEffect(doc, 126, 1194) {
+		t.Fatalf("expected planet 126 to preserve 1194 via planetActiveEffects")
+	}
+}
+
+func TestRewriteStatusDisableGalaxyWideGlobalEventGlobally(t *testing.T) {
+	raw := []byte(`{
+		"warId": 801,
+		"time": 87746480,
+		"planetStatus": [
+			{"index": 78, "owner": 2, "health": 500000},
+			{"index": 126, "owner": 1, "health": 1000000}
+		],
+		"planetActiveEffects": [{"index": 126, "galacticEffectId": 1395}],
+		"campaigns": [],
+		"globalEvents": [
+			{"eventId": 1501121, "effectIds": [1194], "planetIndices": [], "expireTime": 87885416}
+		]
+	}`)
+	plan := config.Plan{
+		Schema:                2,
+		Targets:               []config.PlanetTarget{},
+		DisabledGlobalEffects: []int{1194},
+	}
+	ctx := &RewriteContext{
+		AllowAllEffects: true,
+		CampaignIDs:     make(map[int]int),
+		DefenseStates:   make(map[int]DefenseState),
+	}
+	out, summary, err := RewriteStatus(raw, plan, ctx)
+	if err != nil {
+		t.Fatalf("RewriteStatus failed: %v", err)
+	}
+	if summary.EffectsRemoved != 1 || summary.ChangedCount != 1 {
+		t.Fatalf("expected 1 global removal and 1 change, got %+v", summary)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(out, &doc); err != nil {
+		t.Fatal(err)
+	}
+	ge0 := doc["globalEvents"].([]any)[0].(map[string]any)
+	if effIDs := ge0["effectIds"].([]any); len(effIDs) != 0 {
+		t.Fatalf("expected globalEvents[0].effectIds empty, got %v", effIDs)
+	}
+	if hasPlanetEffect(doc, 78, 1194) || hasPlanetEffect(doc, 126, 1194) {
+		t.Fatalf("expected no planetActiveEffects expanded for globally disabled 1194")
+	}
+	if !hasPlanetEffect(doc, 126, 1395) {
+		t.Fatalf("expected unrelated effect 1395 preserved on planet 126")
+	}
+}
+
+func TestRewriteStatusDisableLastPlanetInRegionalGlobalEvent(t *testing.T) {
+	raw := []byte(`{
+		"warId": 801,
+		"time": 86383570,
+		"planetStatus": [{"index": 124, "owner": 2, "health": 1000000}, {"index": 126, "owner": 1, "health": 2000000}],
+		"planetActiveEffects": [],
+		"campaigns": [],
+		"globalEvents": [
+			{"eventId": 1501111, "effectIds": [1400, 1401], "planetIndices": [124]}
+		]
+	}`)
+	plan := config.Plan{
+		Schema: 2,
+		Targets: []config.PlanetTarget{
+			{
+				Planet:                124,
+				Enabled:               true,
+				DisabledNativeEffects: []int{1400},
+			},
+		},
+	}
+	ctx := &RewriteContext{
+		AllowAllEffects: true,
+		CampaignIDs:     make(map[int]int),
+		DefenseStates:   make(map[int]DefenseState),
+	}
+	out, _, err := RewriteStatus(raw, plan, ctx)
+	if err != nil {
+		t.Fatalf("RewriteStatus failed: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(out, &doc); err != nil {
+		t.Fatal(err)
+	}
+	ge0 := doc["globalEvents"].([]any)[0].(map[string]any)
+	if pIdx := ge0["planetIndices"].([]any); len(pIdx) != 0 {
+		t.Fatalf("expected empty planetIndices, got %v", pIdx)
+	}
+	if effIDs := ge0["effectIds"].([]any); len(effIDs) != 0 {
+		t.Fatalf("expected empty effectIds so regional event does not become galaxy-wide, got %v", effIDs)
+	}
+	if hasPlanetEffect(doc, 124, 1400) {
+		t.Fatalf("expected 1400 removed from planet 124")
+	}
+	if !hasPlanetEffect(doc, 124, 1401) {
+		t.Fatalf("expected non-disabled 1401 preserved on planet 124")
+	}
+	if hasPlanetEffect(doc, 126, 1400) || hasPlanetEffect(doc, 126, 1401) {
+		t.Fatalf("expected planet 126 unaffected")
+	}
+}
+
 func TestRewriteStatusDisableSpaceStationEffects(t *testing.T) {
 	raw := []byte(`{
 		"warId": 801,

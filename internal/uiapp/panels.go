@@ -20,107 +20,155 @@ var (
 	ownerOptions       = []string{"保持原样 (0)", "超级地球 (1)", "终结族 (2)", "机器人 (3)", "光能者 (4)"}
 	campTypeOptions    = []string{"常规解放 (0)", "城市/特殊 (3)", "防守战役 (4)"}
 	campRaceOptions    = []string{"自动推断 (0)", "终结族 (2)", "机器人 (3)", "光能者 (4)"}
+	effectFilterGroups = []string{
+		"全部", "仅已选",
+		"敌情与变种", "兵种激增", "临时配发战备", "冷却与重装", "作战增减益",
+		"弹药与补给", "星球环境与通路", "空间站与战术行动", "设施与星球标记",
+		"配套星图词条", "未解效果",
+	}
 )
 
 func (a *App) buildLeftNavigator(c *ui.Context) {
-	ui.Column(c).Width(258*a.panelScale(0.95, 1.25)).FillHeight().Background(BgMid).BorderWidth(0, 1, 0, 0).BorderColor(BorderSub).Padding(10).Gap(8).Children(func() {
-		ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
-			ui.Text(c, "星球导航").FontSize(a.fs(13)).Bold().TextColor(HD2Gold)
-			ui.Textf(c, "%d 颗", len(a.galaxy.Planets)).FontSize(a.fs(11)).TextColor(TextMute)
-		})
-
-		ui.SearchField(c.Key("planet-search"), &a.planetQuery).Placeholder("名称 / 英文 / ID / 星区").FillWidth()
-
-		// Filter pills
-		ui.Row(c).Wrap().Gap(4).Children(func() {
-			for i, lbl := range planetFilterLabels {
-				active := a.planetFilter == i
-				btn := ui.Box(c.Key(fmt.Sprintf("pf-%d", i))).Padding(3, 8).Radius(999).Cursor(ui.CursorPointer)
-				if active {
-					btn.Background(HD2GoldDim).Border(1, HD2Gold)
-				} else {
-					btn.Background(BgCard).Border(1, BorderSub)
-				}
-				btn.Children(func() {
-					col := TextDim
-					if active {
-						col = HD2Gold
-					}
-					ui.Text(c, lbl).FontSize(a.fs(11)).TextColor(col)
+	_, winH := c.Size()
+	ui.Column(c).Width(312*a.panelScale(0.95, 1.20)).FillHeight().Background(BgMid).BorderWidth(0, 1, 0, 0).BorderColor(BorderSub).Padding(10).Gap(8).Children(func() {
+		if !a.showPlanetNav {
+			ui.Row(c).Shrink(0).FillWidth().Padding(8, 10).Radius(8).Background(BgCard).Border(1, BorderSub).
+				AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
+				hdr := ui.Row(c.Key("toggle-planet-nav")).Grow(1).Gap(6).AlignItems(ui.Center).Cursor(ui.CursorPointer).Children(func() {
+					ui.Text(c, "▶ 星球导航").FontSize(a.fs(12.5)).Bold().TextColor(HD2Gold)
+					ui.Textf(c, "%d 颗", len(a.galaxy.Planets)).FontSize(a.fs(11)).TextColor(TextMute)
 				})
-				if btn.Clicked() {
-					a.planetFilter = i
+				if hdr.Clicked() {
+					a.showPlanetNav = true
 				}
-			}
-		})
-
-		filtered := a.filteredPlanets()
-		targetMap := a.targetMap()
-		selSet := make(map[int]bool, len(a.selectedIDs))
-		for _, id := range a.selectedIDs {
-			selSet[id] = true
-		}
-
-		ui.List(c.Key("planet-list"), &a.planetListState, len(filtered)).Grow(1).FillWidth().
-			ItemKey(func(i int) any { return filtered[i].ID }).
-			Rows(func(row ui.ListRow) {
-				pl := filtered[row.Index]
-				isSel := selSet[pl.ID]
-				tgt, hasTgt := targetMap[pl.ID]
-
-				r := ui.Row(row.Context).FillWidth().Padding(6, 8).Gap(8).AlignItems(ui.Center).Radius(6).Cursor(ui.CursorPointer)
-				if isSel {
-					r.Background(ui.RGBA(81, 217, 199, 0.16)).Border(1, CyanActive.Alpha(0.75))
-				} else if row.Hovered() {
-					r.Background(BgCardHover)
-				}
-				r.Children(func() {
-					ui.Box(row.Context).Size(8, 8).Radius(4).Background(FactionColor(pl.Owner)).Shrink(0)
-					ui.Column(row.Context).Grow(1).Gap(1).Children(func() {
-						ui.Row(row.Context).AlignItems(ui.Center).Gap(4).Children(func() {
-							ui.Text(row.Context, pl.DisplayName()).FontSize(a.fs(12)).Bold().TextColor(TextPrimary)
-							ui.Textf(row.Context, "#%d", pl.ID).FontSize(a.fs(10)).TextColor(TextMute)
-						})
-						sub := pl.SectorZH
-						if sub != "" {
-							sub += "星区"
-						}
-						if pl.NameEN != "" {
-							if sub != "" {
-								sub += " · "
-							}
-							sub += pl.NameEN
-						}
-						ui.Text(row.Context, sub).FontSize(a.fs(10)).TextColor(TextMute)
-					})
-					if hasTgt {
-						badgeCol := CyanActive
-						txt := "已配"
-						if !tgt.Enabled {
-							badgeCol = TextMute
-							txt = "暂停"
-						}
-						ui.Box(row.Context).Padding(2, 6).Radius(999).Background(badgeCol.Alpha(0.18)).Border(1, badgeCol.Alpha(0.65)).Children(func() {
-							ui.Text(row.Context, txt).FontSize(a.fs(10)).TextColor(badgeCol)
-						})
-					} else if pl.IsDefense {
-						ui.Box(row.Context).Padding(2, 5).Radius(999).Background(RedDanger.Alpha(0.2)).Children(func() {
-							ui.Text(row.Context, "防").FontSize(a.fs(10)).TextColor(RedDanger)
-						})
-					} else if pl.HasCampaign {
-						ui.Textf(row.Context, "%.0f%%", pl.LiberationPct()).FontSize(a.fs(10)).TextColor(HD2Gold)
-					}
-				})
-				if r.Clicked() {
-					a.handleMapSelect(pl.ID, c.Modifiers())
-					a.starMap.FocusPlanet(pl)
+				if ui.Button(c.Key("btn-toggle-planet-nav"), "展开").Clicked() {
+					a.showPlanetNav = true
 				}
 			})
+		} else {
+			var navH float32
+			if len(a.selectedIDs) == 0 {
+				navH = 260
+				if winH > 0 {
+					navH = min(float32(340), max(float32(210), winH*0.40))
+				}
+			} else {
+				navH = 210
+				if winH > 0 {
+					navH = min(float32(240), max(float32(170), winH*0.28))
+				}
+			}
+
+			ui.Column(c).Shrink(0).FillWidth().Height(navH).Clip().Padding(8).Gap(6).Radius(8).Background(BgCard).Border(1, BorderSub).Children(func() {
+				ui.Row(c).Shrink(0).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
+					hdr := ui.Row(c.Key("toggle-planet-nav")).Grow(1).Gap(6).AlignItems(ui.Center).Cursor(ui.CursorPointer).Children(func() {
+						ui.Text(c, "▼ 星球导航").FontSize(a.fs(12.5)).Bold().TextColor(HD2Gold)
+						ui.Textf(c, "%d 颗", len(a.galaxy.Planets)).FontSize(a.fs(11)).TextColor(TextMute)
+					})
+					if hdr.Clicked() {
+						a.showPlanetNav = false
+					}
+					if ui.Button(c.Key("btn-toggle-planet-nav"), "收起").Clicked() {
+						a.showPlanetNav = false
+					}
+				})
+
+				ui.SearchField(c.Key("planet-search"), &a.planetQuery).Placeholder("名称 / 英文 / ID / 星区").FillWidth().Shrink(0)
+
+				// Filter pills
+				ui.Row(c).Shrink(0).Wrap().Gap(4).Children(func() {
+					for i, lbl := range planetFilterLabels {
+						active := a.planetFilter == i
+						btn := ui.Box(c.Key(fmt.Sprintf("pf-%d", i))).Padding(3, 8).Radius(999).Cursor(ui.CursorPointer)
+						if active {
+							btn.Background(HD2GoldDim).Border(1, HD2Gold)
+						} else {
+							btn.Background(BgMid).Border(1, BorderSub)
+						}
+						btn.Children(func() {
+							col := TextDim
+							if active {
+								col = HD2Gold
+							}
+							ui.Text(c, lbl).FontSize(a.fs(11)).TextColor(col)
+						})
+						if btn.Clicked() {
+							a.planetFilter = i
+						}
+					}
+				})
+
+				filtered := a.filteredPlanets()
+				targetMap := a.targetMap()
+				selSet := make(map[int]bool, len(a.selectedIDs))
+				for _, id := range a.selectedIDs {
+					selSet[id] = true
+				}
+
+				ui.List(c.Key("planet-list"), &a.planetListState, len(filtered)).Grow(1).FillWidth().KeepScrollbars(true).
+					ItemKey(func(i int) any { return filtered[i].ID }).
+					Rows(func(row ui.ListRow) {
+						pl := filtered[row.Index]
+						isSel := selSet[pl.ID]
+						tgt, hasTgt := targetMap[pl.ID]
+
+						r := ui.Row(row.Context).FillWidth().Padding(6, 8).Gap(8).AlignItems(ui.Center).Radius(6).Cursor(ui.CursorPointer)
+						if isSel {
+							r.Background(ui.RGBA(81, 217, 199, 0.16)).Border(1, CyanActive.Alpha(0.75))
+						} else if row.Hovered() {
+							r.Background(BgCardHover)
+						}
+						r.Children(func() {
+							ui.Box(row.Context).Size(8, 8).Radius(4).Background(FactionColor(pl.Owner)).Shrink(0)
+							ui.Column(row.Context).Grow(1).Gap(1).Children(func() {
+								ui.Row(row.Context).AlignItems(ui.Center).Gap(4).Children(func() {
+									ui.Text(row.Context, pl.DisplayName()).FontSize(a.fs(12)).Bold().TextColor(TextPrimary)
+									ui.Textf(row.Context, "#%d", pl.ID).FontSize(a.fs(10)).TextColor(TextMute)
+								})
+								sub := pl.SectorZH
+								if sub != "" {
+									sub += "星区"
+								}
+								if pl.NameEN != "" {
+									if sub != "" {
+										sub += " · "
+									}
+									sub += pl.NameEN
+								}
+								ui.Text(row.Context, sub).FontSize(a.fs(10)).TextColor(TextMute)
+							})
+							if hasTgt {
+								badgeCol := CyanActive
+								txt := "已配"
+								if !tgt.Enabled {
+									badgeCol = TextMute
+									txt = "暂停"
+								}
+								ui.Box(row.Context).Padding(2, 6).Radius(999).Background(badgeCol.Alpha(0.18)).Border(1, badgeCol.Alpha(0.65)).Children(func() {
+									ui.Text(row.Context, txt).FontSize(a.fs(10)).TextColor(badgeCol)
+								})
+							} else if pl.IsDefense {
+								ui.Box(row.Context).Padding(2, 5).Radius(999).Background(RedDanger.Alpha(0.2)).Children(func() {
+									ui.Text(row.Context, "防").FontSize(a.fs(10)).TextColor(RedDanger)
+								})
+							} else if pl.HasCampaign {
+								ui.Textf(row.Context, "%.0f%%", pl.LiberationPct()).FontSize(a.fs(10)).TextColor(HD2Gold)
+							}
+						})
+						if r.Clicked() {
+							a.handleMapSelect(pl.ID, c.Modifiers())
+							a.starMap.FocusPlanet(pl)
+						}
+					})
+			})
+		}
+
+		a.buildEffectPickerCard(c)
 	})
 }
 
 func (a *App) buildRightConsole(c *ui.Context) {
-	ui.Column(c).Width(404*a.panelScale(0.95, 1.25)).FillHeight().Background(BgMid).BorderWidth(0, 0, 0, 1).BorderColor(BorderSub).Padding(12).Gap(10).Children(func() {
+	ui.Column(c).Width(348*a.panelScale(0.95, 1.20)).FillHeight().Background(BgMid).BorderWidth(0, 0, 0, 1).BorderColor(BorderSub).Padding(12).Gap(10).Children(func() {
 		ui.Segmented(c.Key("right-tabs"), &a.rightTab, "星球变种配置", "代理下发与连接").FillWidth()
 
 		if a.rightTab == 0 {
@@ -136,35 +184,22 @@ func (a *App) buildVariantTab(c *ui.Context) {
 	if len(a.selectedIDs) == 0 {
 		ui.Column(c).Padding(12).Gap(6).Radius(8).Background(BgCard).Border(1, BorderSub).Children(func() {
 			ui.Text(c, "未选中星球").FontSize(a.fs(13)).Bold().TextColor(HD2Gold)
-			ui.Text(c, "在左侧列表或中央星图上单击星球即可开始编辑变种与战役配置；按住 Ctrl 单击可多选并批量下发。").FontSize(a.fs(11.5)).TextColor(TextDim)
+			ui.Text(c, "在左侧「星球导航」或中央星图上单击星球即可开始编辑变种与战役配置；按住 Ctrl 单击可多选并批量下发。").FontSize(a.fs(11.5)).TextColor(TextDim)
 		})
+		if len(a.galaxy.GlobalEffects) > 0 || len(a.plan.DisabledGlobalEffects) > 0 {
+			a.buildGlobalEffectsCard(c)
+		}
 		a.buildConfiguredList(c)
 		return
 	}
 
-	_, winH := c.Size()
-	compact := winH > 0 && winH/a.fontScale() < 500
-	if compact {
-		a.buildSelectedSummaryCard(c)
-		ui.Scroll(c.Key("variant-compact-scroll")).Grow(1).FillWidth().KeepScrollbars(true).Children(func() {
-			ui.Column(c).FillWidth().Gap(10).Children(func() {
-				a.buildEffectsInspectorCard(c)
-				a.buildCampaignConfigCard(c)
-				a.buildEffectPickerCard(c, true)
-				a.buildVariantFooter(c)
-			})
-		})
-		return
-	}
-
 	a.buildSelectedSummaryCard(c)
-	ui.Scroll(c.Key("variant-upper-scroll")).FillWidth().MinHeight(80 * a.panelScale(0.95, 1.15)).KeepScrollbars(true).Children(func() {
+	ui.Scroll(c.Key("variant-detail-scroll")).Grow(1).FillWidth().KeepScrollbars(true).Children(func() {
 		ui.Column(c).FillWidth().Gap(10).Children(func() {
 			a.buildEffectsInspectorCard(c)
 			a.buildCampaignConfigCard(c)
 		})
 	})
-	a.buildEffectPickerCard(c, false)
 	a.buildVariantFooter(c)
 }
 
@@ -254,12 +289,108 @@ func (a *App) buildSelectedSummaryCard(c *ui.Context) {
 	})
 }
 
+func (a *App) buildGlobalEffectsCard(c *ui.Context) {
+	seen := make(map[int]bool, len(a.galaxy.GlobalEffects)+len(a.plan.DisabledGlobalEffects))
+	var allGlobal []int
+	for _, eid := range a.galaxy.GlobalEffects {
+		if !seen[eid] {
+			seen[eid] = true
+			allGlobal = append(allGlobal, eid)
+		}
+	}
+	for _, eid := range a.plan.DisabledGlobalEffects {
+		if !seen[eid] {
+			seen[eid] = true
+			allGlobal = append(allGlobal, eid)
+		}
+	}
+	slices.Sort(allGlobal)
+
+	globalDisSet := make(map[int]bool, len(a.plan.DisabledGlobalEffects))
+	for _, eid := range a.plan.DisabledGlobalEffects {
+		globalDisSet[eid] = true
+	}
+	hasActiveGlobal := false
+	for _, eid := range allGlobal {
+		if !globalDisSet[eid] {
+			hasActiveGlobal = true
+			break
+		}
+	}
+
+	ui.Column(c).Shrink(0).Padding(10).Gap(6).Radius(8).Background(BgCard).Border(1, HD2Gold.Alpha(0.45)).Children(func() {
+		ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
+			ui.Textf(c, "官方全星系效果 (%d)", len(allGlobal)).FontSize(a.fs(12.5)).Bold().TextColor(HD2Gold)
+			ui.Row(c).Gap(4).Children(func() {
+				if hasActiveGlobal {
+					if ui.Button(c.Key("dis-all-glb"), "全部全局取消").Clicked() {
+						if err := a.disableAllGlobalEffects(allGlobal); err != nil {
+							c.Toast(err.Error())
+						} else {
+							c.Toast("已全局取消全部全星系效果并下发")
+						}
+					}
+				}
+				if len(a.plan.DisabledGlobalEffects) > 0 {
+					if ui.Button(c.Key("rst-all-glb"), "恢复全部").Clicked() {
+						if err := a.restoreAllGlobalEffects(); err != nil {
+							c.Toast(err.Error())
+						} else {
+							c.Toast("已恢复全部官方全星系效果")
+						}
+					}
+				}
+			})
+		})
+		ui.Text(c, "官方通过全星系事件下发的临时战备/全局效果，点击即可在全银河范围内取消并立即下发到代理。").FontSize(a.fs(10.5)).TextColor(TextDim)
+		ui.Row(c).Wrap().Gap(4).Children(func() {
+			for _, eid := range allGlobal {
+				isDisabled := globalDisSet[eid]
+				chipCol := HD2Gold
+				label := fmt.Sprintf("%s #%d", a.effectDisplayName(eid), eid)
+				action := "全局取消"
+				if isDisabled {
+					chipCol = RedDanger
+					label = "[已全局取消] " + label
+					action = "恢复"
+				}
+				chip := ui.Row(c.Key(fmt.Sprintf("glb-%d", eid))).Padding(3, 7).Gap(5).AlignItems(ui.Center).
+					Radius(999).Background(chipCol.Alpha(0.14)).Border(1, chipCol.Alpha(0.55)).Cursor(ui.CursorPointer)
+				chip.Children(func() {
+					ui.Text(c, label).FontSize(a.fs(10.5)).TextColor(chipCol)
+					ui.Text(c, action).FontSize(a.fs(10)).Bold().TextColor(TextPrimary)
+				})
+				if chip.Clicked() {
+					if err := a.toggleDisableGlobalEffect(eid); err != nil {
+						c.Toast(err.Error())
+					} else if isDisabled {
+						c.Toast("已恢复全星系效果并下发到代理")
+					} else {
+						c.Toast("已全局取消全星系效果并下发到代理")
+					}
+				}
+			}
+		})
+	})
+}
+
 func (a *App) buildEffectsInspectorCard(c *ui.Context) {
 	// Native Effects & Added Custom Effects Inspector
 	nativeEffects := a.selectedNativeEffects()
 	disSet := make(map[int]bool, len(a.draft.DisabledNativeEffects))
 	for _, eid := range a.draft.DisabledNativeEffects {
 		disSet[eid] = true
+	}
+	globalDisSet := make(map[int]bool, len(a.plan.DisabledGlobalEffects))
+	for _, eid := range a.plan.DisabledGlobalEffects {
+		globalDisSet[eid] = true
+	}
+	hasAnyActiveNative := false
+	for _, eid := range nativeEffects {
+		if !disSet[eid] && !globalDisSet[eid] {
+			hasAnyActiveNative = true
+			break
+		}
 	}
 
 	ui.Column(c).Shrink(0).Padding(9).Gap(6).Radius(8).Background(BgCard).Border(1, BorderSub).Children(func() {
@@ -268,7 +399,7 @@ func (a *App) buildEffectsInspectorCard(c *ui.Context) {
 			ui.Textf(c, "原版自带效果 (%d)", len(nativeEffects)).FontSize(a.fs(12)).Bold().TextColor(ColorHumans)
 			if len(nativeEffects) > 0 {
 				ui.Row(c).Gap(4).Children(func() {
-					if len(a.draft.DisabledNativeEffects) < len(nativeEffects) {
+					if hasAnyActiveNative {
 						if ui.Button(c.Key("dis-all-nat"), "全部取消").Clicked() {
 							a.disableAllNativeEffects(nativeEffects)
 						}
@@ -286,11 +417,22 @@ func (a *App) buildEffectsInspectorCard(c *ui.Context) {
 		} else {
 			ui.Row(c).Wrap().Gap(4).Children(func() {
 				for _, eid := range nativeEffects {
-					isDisabled := disSet[eid]
+					isGlobal := a.galaxy.IsGlobalEffect(eid)
+					isGlobalDisabled := globalDisSet[eid]
+					isLocalDisabled := disSet[eid]
+
 					chipCol := ColorHumans
 					label := fmt.Sprintf("%s #%d", a.effectDisplayName(eid), eid)
+					if isGlobal {
+						chipCol = HD2Gold
+						label = "[全星系] " + label
+					}
 					action := "取消"
-					if isDisabled {
+					if isGlobalDisabled {
+						chipCol = RedDanger
+						label = "[已全局取消] " + label
+						action = "恢复全局"
+					} else if isLocalDisabled {
 						chipCol = RedDanger
 						label = "[已取消] " + label
 						action = "恢复"
@@ -302,10 +444,50 @@ func (a *App) buildEffectsInspectorCard(c *ui.Context) {
 						ui.Text(c, action).FontSize(a.fs(10)).Bold().TextColor(TextPrimary)
 					})
 					if chip.Clicked() {
-						a.toggleDisableNativeEffect(eid)
+						if isGlobalDisabled {
+							if err := a.toggleDisableGlobalEffect(eid); err != nil {
+								c.Toast(err.Error())
+							} else {
+								c.Toast("已恢复全星系效果并下发到代理")
+							}
+						} else {
+							a.toggleDisableNativeEffect(eid)
+						}
 					}
 				}
 			})
+			if len(a.galaxy.GlobalEffects) > 0 {
+				hasActiveGlobal := false
+				hasDisabledGlobal := false
+				for _, eid := range a.galaxy.GlobalEffects {
+					if globalDisSet[eid] {
+						hasDisabledGlobal = true
+					} else {
+						hasActiveGlobal = true
+					}
+				}
+				ui.Row(c).Wrap().Gap(6).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, "全星系事件：").FontSize(a.fs(10.5)).TextColor(TextDim)
+					if hasActiveGlobal {
+						if ui.Button(c.Key("nat-dis-all-glb"), "一键全局取消全星系效果").Clicked() {
+							if err := a.disableAllGlobalEffects(a.galaxy.GlobalEffects); err != nil {
+								c.Toast(err.Error())
+							} else {
+								c.Toast("已全局取消全星系效果并下发到代理")
+							}
+						}
+					}
+					if hasDisabledGlobal {
+						if ui.Button(c.Key("nat-rst-all-glb"), "恢复全局效果").Clicked() {
+							if err := a.restoreAllGlobalEffects(); err != nil {
+								c.Toast(err.Error())
+							} else {
+								c.Toast("已恢复全部官方全星系效果")
+							}
+						}
+					}
+				})
+			}
 		}
 
 		ui.Divider(c)
@@ -320,7 +502,7 @@ func (a *App) buildEffectsInspectorCard(c *ui.Context) {
 			}
 		})
 		if len(a.draft.Effects) == 0 {
-			ui.Text(c, "尚未添加自定义效果，请在下方目录点击勾选").FontSize(a.fs(11)).TextColor(TextMute)
+			ui.Text(c, "尚未添加自定义效果，请在左侧「星系效果与变种」点击勾选").FontSize(a.fs(11)).TextColor(TextMute)
 		} else {
 			ui.Row(c).Wrap().Gap(4).Children(func() {
 				for _, eid := range a.draft.Effects {
@@ -504,23 +686,17 @@ func (a *App) buildCampaignConfigCard(c *ui.Context) {
 	})
 }
 
-func (a *App) buildEffectPickerCard(c *ui.Context, compact bool) {
-	// Effect Catalog Picker
-	_, winH := c.Size()
-	picker := ui.Column(c.Key("eff-picker-card")).Clip().Padding(10).Gap(6).Radius(8).Background(BgCard).Border(1, BorderSub)
-	if compact {
-		picker.Shrink(0)
-	} else {
-		minPickerH := float32(290) * a.panelScale(1.0, 1.25)
-		if winH > 0 {
-			minPickerH = min(minPickerH, max(float32(240), winH*0.43))
-		}
-		picker.Grow(1).MinHeight(minPickerH)
-	}
+func (a *App) buildEffectPickerCard(c *ui.Context) {
+	// Effect Catalog Picker (placed in left sidebar below collapsible planet navigator)
+	picker := ui.Column(c.Key("eff-picker-card")).Grow(1).FillWidth().Clip().Padding(8).Gap(6).Radius(8).Background(BgCard).Border(1, BorderSub)
 	picker.Children(func() {
 		ui.Row(c).Shrink(0).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
-			ui.Textf(c, "星系效果与变种 (%d 已选)", len(a.draft.Effects)).FontSize(a.fs(12.5)).Bold().TextColor(HD2Gold)
-			if len(a.draft.Effects) > 0 {
+			hdr := "星系效果与变种（请先选中星球）"
+			if len(a.selectedIDs) > 0 {
+				hdr = fmt.Sprintf("星系效果与变种 (%d 已选)", len(a.draft.Effects))
+			}
+			ui.Text(c, hdr).FontSize(a.fs(12.5)).Bold().TextColor(HD2Gold)
+			if len(a.selectedIDs) > 0 && len(a.draft.Effects) > 0 {
 				if ui.Button(c.Key("clr-eff"), "清空效果").Clicked() {
 					a.draft.Effects = nil
 				}
@@ -530,9 +706,8 @@ func (a *App) buildEffectPickerCard(c *ui.Context, compact bool) {
 		ui.SearchField(c.Key("eff-search"), &a.effectQuery).Placeholder("搜索效果中文 / 英文 / ID").FillWidth().Shrink(0)
 
 		// Group filter chips
-		groups := []string{"全部", "仅已选", "敌情与变种", "作战增减益", "临时配发战备", "弹药与补给", "星球环境与通路", "空间站与战术行动", "设施与星球标记"}
 		ui.Row(c).Shrink(0).Wrap().Gap(4).Children(func() {
-			for _, g := range groups {
+			for _, g := range effectFilterGroups {
 				active := a.effectGroup == g
 				chip := ui.Box(c.Key("eg-" + g)).Padding(2, 7).Radius(999).Cursor(ui.CursorPointer)
 				if active {
@@ -555,16 +730,13 @@ func (a *App) buildEffectPickerCard(c *ui.Context, compact bool) {
 
 		effList := a.filteredEffects()
 		selEff := make(map[int]bool, len(a.draft.Effects))
-		for _, eid := range a.draft.Effects {
-			selEff[eid] = true
+		if len(a.selectedIDs) > 0 {
+			for _, eid := range a.draft.Effects {
+				selEff[eid] = true
+			}
 		}
 
-		list := ui.List(c.Key("eff-list"), &a.effectListState, len(effList)).FillWidth().KeepScrollbars(true)
-		if compact {
-			list.Height(240 * a.panelScale(1.0, 1.30))
-		} else {
-			list.Grow(1).MinHeight(96 * a.panelScale(1.0, 1.25))
-		}
+		list := ui.List(c.Key("eff-list"), &a.effectListState, len(effList)).Grow(1).FillWidth().MinHeight(80).KeepScrollbars(true)
 		list.ItemKey(func(i int) any { return effList[i].ID }).
 			Rows(func(row ui.ListRow) {
 				eff := effList[row.Index]
@@ -598,7 +770,11 @@ func (a *App) buildEffectPickerCard(c *ui.Context, compact bool) {
 					})
 				})
 				if r.Clicked() {
-					a.toggleDraftEffect(eff.ID)
+					if len(a.selectedIDs) == 0 {
+						c.Toast("请先在「星球导航」或星图选中一颗星球")
+					} else {
+						a.toggleDraftEffect(eff.ID)
+					}
 				}
 			})
 	})

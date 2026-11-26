@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 
 	"hd2-strain-lab/internal/config"
@@ -156,8 +157,16 @@ func RewriteStatus(raw []byte, plan config.Plan, ctx *RewriteContext) ([]byte, R
 	if err != nil {
 		return raw, summary, err
 	}
-	if len(targets) == 0 {
+	disabledGlobalList, err := config.NormalizeDisabledGlobalEffects(plan)
+	if err != nil {
+		return raw, summary, err
+	}
+	if len(targets) == 0 && len(disabledGlobalList) == 0 {
 		return raw, summary, nil
+	}
+	disabledGlobal := make(map[int]bool, len(disabledGlobalList))
+	for _, eid := range disabledGlobalList {
+		disabledGlobal[eid] = true
 	}
 
 	doc, err := decodeJSONObject(raw)
@@ -182,6 +191,11 @@ func RewriteStatus(raw []byte, plan config.Plan, ctx *RewriteContext) ([]byte, R
 		}
 		knownPlanets[idx] = true
 	}
+	knownPlanetIDs := make([]int, 0, len(knownPlanets))
+	for pid := range knownPlanets {
+		knownPlanetIDs = append(knownPlanetIDs, pid)
+	}
+	slices.Sort(knownPlanetIDs)
 
 	type pairKey struct{ p, e int }
 	existingPairs := make(map[pairKey]bool, len(rawEntries))
@@ -241,7 +255,7 @@ func RewriteStatus(raw []byte, plan config.Plan, ctx *RewriteContext) ([]byte, R
 		}
 		activeTargets = append(activeTargets, t)
 	}
-	if len(activeTargets) == 0 {
+	if len(activeTargets) == 0 && len(disabledGlobal) == 0 {
 		return raw, summary, nil
 	}
 
@@ -254,14 +268,14 @@ func RewriteStatus(raw []byte, plan config.Plan, ctx *RewriteContext) ([]byte, R
 		campaigns = []any{}
 	}
 
-	// Remove disabled native effects first
+	// Remove disabled native & global effects first
 	disabledPairs := make(map[pairKey]bool)
 	for _, t := range activeTargets {
 		for _, eid := range t.DisabledNativeEffects {
 			disabledPairs[pairKey{t.Planet, eid}] = true
 		}
 	}
-	if len(disabledPairs) > 0 {
+	if len(disabledPairs) > 0 || len(disabledGlobal) > 0 {
 		keptEntries := make([]any, 0, len(entries))
 		clear(existingPairs)
 		for _, row := range entries {
@@ -270,7 +284,7 @@ func RewriteStatus(raw []byte, plan config.Plan, ctx *RewriteContext) ([]byte, R
 				eID, okE := asInt(m["galacticEffectId"])
 				if okP && okE {
 					k := pairKey{pIdx, eID}
-					if disabledPairs[k] {
+					if disabledPairs[k] || disabledGlobal[eID] {
 						summary.EffectsRemoved++
 						summary.ChangedCount++
 						continue
@@ -283,27 +297,45 @@ func RewriteStatus(raw []byte, plan config.Plan, ctx *RewriteContext) ([]byte, R
 		entries = keptEntries
 		res["planetActiveEffects"] = entries
 
-		// Also remove disabled native effects applied via globalEvents[].planetIndices
+		// Also remove disabled native & global effects applied via globalEvents
 		if geList, okGE := asSlice(res["globalEvents"]); okGE {
+			nowTime, okNow := asFloat(res["time"])
 			for _, geRaw := range geList {
 				ge, okM := asMap(geRaw)
 				if !okM {
 					continue
 				}
-				rawEffs, okE := asSlice(ge["effectIds"])
-				rawPlanetsGE, okP := asSlice(ge["planetIndices"])
-				if !okE || !okP || len(rawEffs) == 0 {
+				if exp, okExp := asFloat(ge["expireTime"]); okExp && exp > 0 && okNow && nowTime > 0 && exp <= nowTime {
 					continue
 				}
+				rawEffs, okE := asSlice(ge["effectIds"])
+				if !okE || len(rawEffs) == 0 {
+					continue
+				}
+				rawPlanetsGE, _ := asSlice(ge["planetIndices"])
+
+				remainingRawEffs := make([]any, 0, len(rawEffs))
 				geEffs := make([]int, 0, len(rawEffs))
+				removedGlobalGE := false
 				for _, r := range rawEffs {
 					if id, ok := asInt(r); ok {
+						if disabledGlobal[id] {
+							removedGlobalGE = true
+							summary.EffectsRemoved++
+							summary.ChangedCount++
+							continue
+						}
 						geEffs = append(geEffs, id)
 					}
+					remainingRawEffs = append(remainingRawEffs, r)
 				}
-				if len(geEffs) == 0 {
+				if removedGlobalGE {
+					ge["effectIds"] = remainingRawEffs
+				}
+				if len(geEffs) == 0 || len(disabledPairs) == 0 {
 					continue
 				}
+
 				if len(rawPlanetsGE) > 0 {
 					keptPlanets := make([]any, 0, len(rawPlanetsGE))
 					changedGE := false
@@ -341,41 +373,48 @@ func RewriteStatus(raw []byte, plan config.Plan, ctx *RewriteContext) ([]byte, R
 					}
 					if changedGE {
 						ge["planetIndices"] = keptPlanets
+						if len(keptPlanets) == 0 {
+							ge["effectIds"] = []any{}
+						}
 						res["planetActiveEffects"] = entries
 					}
 				} else {
-					// Galaxy-wide globalEvent (empty planetIndices): if any target disables an effect in it,
-					// materialize planetIndices as all other known planets.
-					disabledPlanetsForGE := make(map[int]bool)
-					for _, t := range activeTargets {
-						for _, eid := range geEffs {
+					// Galaxy-wide globalEvent (empty planetIndices): strip any per-planet disabled effect
+					// directly from ge["effectIds"] and preserve it on all other known planets via planetActiveEffects.
+					keptWideRawEffs := make([]any, 0, len(remainingRawEffs))
+					changedWide := false
+					for _, r := range remainingRawEffs {
+						eid, okID := asInt(r)
+						if !okID {
+							keptWideRawEffs = append(keptWideRawEffs, r)
+							continue
+						}
+						disabledCount := 0
+						for _, t := range activeTargets {
 							if disabledPairs[pairKey{t.Planet, eid}] {
-								disabledPlanetsForGE[t.Planet] = true
-								break
+								disabledCount++
+							}
+						}
+						if disabledCount == 0 {
+							keptWideRawEffs = append(keptWideRawEffs, r)
+							continue
+						}
+						changedWide = true
+						summary.EffectsRemoved += disabledCount
+						summary.ChangedCount += disabledCount
+						for _, pid := range knownPlanetIDs {
+							k := pairKey{pid, eid}
+							if !disabledPairs[k] && !existingPairs[k] {
+								existingPairs[k] = true
+								entries = append(entries, map[string]any{
+									"index":            pid,
+									"galacticEffectId": eid,
+								})
 							}
 						}
 					}
-					if len(disabledPlanetsForGE) > 0 {
-						expanded := make([]any, 0, len(knownPlanets))
-						for pid := range knownPlanets {
-							if disabledPlanetsForGE[pid] {
-								summary.EffectsRemoved++
-								summary.ChangedCount++
-								for _, eid := range geEffs {
-									k := pairKey{pid, eid}
-									if !disabledPairs[k] && !existingPairs[k] {
-										existingPairs[k] = true
-										entries = append(entries, map[string]any{
-											"index":            pid,
-											"galacticEffectId": eid,
-										})
-									}
-								}
-								continue
-							}
-							expanded = append(expanded, pid)
-						}
-						ge["planetIndices"] = expanded
+					if changedWide {
+						ge["effectIds"] = keptWideRawEffs
 						res["planetActiveEffects"] = entries
 					}
 				}
@@ -397,7 +436,7 @@ func RewriteStatus(raw []byte, plan config.Plan, ctx *RewriteContext) ([]byte, R
 					keptSS = append(keptSS, ssRaw)
 					continue
 				}
-				if disabledPairs[pairKey{pid, 1217}] {
+				if disabledPairs[pairKey{pid, 1217}] || disabledGlobal[1217] {
 					changedSS = true
 					summary.EffectsRemoved++
 					summary.ChangedCount++
@@ -406,7 +445,7 @@ func RewriteStatus(raw []byte, plan config.Plan, ctx *RewriteContext) ([]byte, R
 				if rawEffs, okE := asSlice(ss["activeEffectIds"]); okE && len(rawEffs) > 0 {
 					keptEffs := make([]any, 0, len(rawEffs))
 					for _, r := range rawEffs {
-						if eid, okID := asInt(r); okID && disabledPairs[pairKey{pid, eid}] {
+						if eid, okID := asInt(r); okID && (disabledPairs[pairKey{pid, eid}] || disabledGlobal[eid]) {
 							changedSS = true
 							summary.EffectsRemoved++
 							summary.ChangedCount++

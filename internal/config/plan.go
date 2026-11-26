@@ -59,8 +59,9 @@ func DefaultTarget(planetID int) PlanetTarget {
 
 // Plan is the top-level dispatch plan sent to the proxy.
 type Plan struct {
-	Schema  int            `json:"schema"`
-	Targets []PlanetTarget `json:"targets"`
+	Schema                int            `json:"schema"`
+	Targets               []PlanetTarget `json:"targets"`
+	DisabledGlobalEffects []int          `json:"disabled_global_effects,omitempty"`
 }
 
 // Settings stores non-sensitive local application preferences.
@@ -293,6 +294,29 @@ func NormalizeTargets(plan Plan) ([]PlanetTarget, error) {
 	slices.SortFunc(out, func(a, b PlanetTarget) int {
 		return a.Planet - b.Planet
 	})
+	return out, nil
+}
+
+// NormalizeDisabledGlobalEffects validates, deduplicates, and sorts globally disabled effect IDs.
+func NormalizeDisabledGlobalEffects(plan Plan) ([]int, error) {
+	if plan.Schema != 0 && plan.Schema != 2 {
+		return nil, fmt.Errorf("不支持的方案版本: %d", plan.Schema)
+	}
+	if len(plan.DisabledGlobalEffects) > 64 {
+		return nil, errors.New("全局取消的原版效果过多")
+	}
+	out := make([]int, 0, len(plan.DisabledGlobalEffects))
+	seen := make(map[int]bool, len(plan.DisabledGlobalEffects))
+	for _, eid := range plan.DisabledGlobalEffects {
+		if eid <= 0 {
+			return nil, fmt.Errorf("全局取消包含无效效果 ID: %d", eid)
+		}
+		if !seen[eid] {
+			seen[eid] = true
+			out = append(out, eid)
+		}
+	}
+	slices.Sort(out)
 	return out, nil
 }
 

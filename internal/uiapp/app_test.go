@@ -2,6 +2,7 @@ package uiapp
 
 import (
 	"math"
+	"slices"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -156,17 +157,17 @@ func TestUIViewTuringNativeAndCustomEffects(t *testing.T) {
 		t.Fatalf("expected planet 126 selected, got %v", app.selectedIDs)
 	}
 
-	// Should display Turing's native effects
-	if !tt.HasText("原版自带效果 (3)") {
-		t.Fatalf("expected Turing native effects count 3 in UI, texts: %v", tt.Texts())
+	// Should display Turing's native effects (3 planet-local + 2 active galaxy-wide in status_sample.json)
+	if !tt.HasText("原版自带效果 (5)") {
+		t.Fatalf("expected Turing native effects count 5 in UI, texts: %v", tt.Texts())
 	}
 
 	// Cancel all native effects
 	if err := tt.Click("全部取消"); err != nil {
 		t.Fatalf("click cancel all native failed: %v", err)
 	}
-	if len(app.draft.DisabledNativeEffects) != 3 {
-		t.Fatalf("expected 3 disabled native effects, got %v", app.draft.DisabledNativeEffects)
+	if len(app.draft.DisabledNativeEffects) != 5 {
+		t.Fatalf("expected 5 disabled native effects, got %v", app.draft.DisabledNativeEffects)
 	}
 
 	// Add a custom effect and verify it appears in "已添加自定义效果 (1)"
@@ -182,7 +183,7 @@ func TestUIViewTuringNativeAndCustomEffects(t *testing.T) {
 	if err := tt.Click("保存并下发到代理"); err != nil {
 		t.Fatalf("dispatch failed: %v", err)
 	}
-	if len(app.plan.Targets) != 1 || len(app.plan.Targets[0].DisabledNativeEffects) != 3 || len(app.plan.Targets[0].Effects) != 1 {
+	if len(app.plan.Targets) != 1 || len(app.plan.Targets[0].DisabledNativeEffects) != 5 || len(app.plan.Targets[0].Effects) != 1 {
 		t.Fatalf("unexpected saved target for Turing: %+v", app.plan.Targets)
 	}
 }
@@ -277,7 +278,13 @@ func TestUIViewCopyPlanetEffectsToAnotherPlanet(t *testing.T) {
 	if err := tt.Click(firstEff.Name); err != nil {
 		t.Fatalf("click custom effect failed: %v", err)
 	}
-	expectedCount := (len(native) - 1) + 1
+	destNative := app.galaxy.PlanetsByID[1].ActiveEffects
+	expectedCount := 1 // firstEff
+	for _, eid := range native[1:] {
+		if !slices.Contains(destNative, eid) {
+			expectedCount++
+		}
+	}
 
 	// Click "拷贝效果到..." then select destination planet #1 (克伦达斯II)
 	if err := tt.Click("拷贝效果到..."); err != nil {
@@ -459,8 +466,11 @@ func TestUIViewEditedPlanetEffectPickerRemainsVisible(t *testing.T) {
 			if !okFooter {
 				t.Fatalf("expected footer button visible")
 			}
-			if rEff.Y+rEff.H > rFooter.Y {
-				t.Fatalf("effect row (%+v) overlaps or overflows past footer (%+v)", rEff, rFooter)
+			if rEff.Y+rEff.H > float32(tc.h) {
+				t.Fatalf("effect row (%+v) overflows window height (%d)", rEff, tc.h)
+			}
+			if rEff.X+rEff.W >= rFooter.X {
+				t.Fatalf("expected effect row (%+v) in left sidebar before right footer (%+v)", rEff, rFooter)
 			}
 			// Verify clicking an effect row in the picker actually works
 			if err := tt.Click(firstEff.Name); err != nil {
@@ -495,6 +505,177 @@ func TestUIViewEditedPlanetEffectPickerRemainsVisible(t *testing.T) {
 			t.Fatalf("expected showCampaignCfg=false for variants-only configured planet")
 		}
 	})
+}
+
+func TestUIViewGlobalEffectDisplayAndCancel(t *testing.T) {
+	prof := t.TempDir()
+	t.Setenv("HD2_STRAIN_LAB_PROFILE", prof)
+
+	app, err := NewApp()
+	if err != nil {
+		t.Fatalf("NewApp failed: %v", err)
+	}
+	defer app.stopProxy()
+
+	liveStatus := []byte(`{
+		"warId": 801,
+		"time": 87746480,
+		"planetStatus": [
+			{"index": 0, "owner": 1, "health": 1000000, "players": 100, "position": {"x": 0, "y": 0}},
+			{"index": 78, "owner": 2, "health": 500000, "players": 50, "position": {"x": 0.4, "y": 0.2}},
+			{"index": 126, "owner": 1, "health": 1000000, "players": 20, "position": {"x": 0.3, "y": 0.3}}
+		],
+		"planetActiveEffects": [],
+		"globalEvents": [
+			{"eventId": 1501121, "effectIds": [1194], "planetIndices": [], "expireTime": 87885416}
+		]
+	}`)
+	if err := app.galaxy.ApplyStatusBytes(liveStatus, "live"); err != nil {
+		t.Fatalf("ApplyStatusBytes failed: %v", err)
+	}
+
+	tt := ui.NewTester(app.View, 1380, 860)
+
+	// 1. Unselected view shows "官方全星系效果 (1)" and #1194
+	if !tt.HasText("官方全星系效果 (1)") {
+		t.Fatalf("expected global effects card header in unselected view, texts: %v", tt.Texts())
+	}
+	if !tt.HasText("临时配发：轨道凝固汽油弹火力网 #1194") {
+		t.Fatalf("expected effect #1194 chip in global effects card, texts: %v", tt.Texts())
+	}
+
+	// Click to globally cancel #1194
+	if err := tt.Click("临时配发：轨道凝固汽油弹火力网 #1194"); err != nil {
+		t.Fatalf("click global effect #1194 failed: %v", err)
+	}
+	if !slices.Equal(app.plan.DisabledGlobalEffects, []int{1194}) {
+		t.Fatalf("expected DisabledGlobalEffects [1194], got %v", app.plan.DisabledGlobalEffects)
+	}
+
+	// Verify persistence when configuring a planet via commitTargetMap
+	app.handleMapSelect(78, 0)
+	tt.Frame()
+	if !tt.HasText("[已全局取消] [全星系] 临时配发：轨道凝固汽油弹火力网 #1194") {
+		t.Fatalf("expected globally disabled badge on selected planet view, texts: %v", tt.Texts())
+	}
+	if err := tt.Click("保存并下发到代理"); err != nil {
+		t.Fatalf("dispatch failed: %v", err)
+	}
+	if !slices.Equal(app.plan.DisabledGlobalEffects, []int{1194}) {
+		t.Fatalf("expected DisabledGlobalEffects [1194] preserved after commitTargetMap, got %v", app.plan.DisabledGlobalEffects)
+	}
+
+	loaded, err := config.LoadPlan(prof)
+	if err != nil {
+		t.Fatalf("LoadPlan failed: %v", err)
+	}
+	if !slices.Equal(loaded.DisabledGlobalEffects, []int{1194}) {
+		t.Fatalf("expected persisted DisabledGlobalEffects [1194], got %v", loaded.DisabledGlobalEffects)
+	}
+
+	// Restore global effect via selected planet inspector button, then test per-planet cancel
+	if err := tt.Click("恢复全局效果"); err != nil {
+		t.Fatalf("click 恢复全局效果 failed: %v", err)
+	}
+	if len(app.plan.DisabledGlobalEffects) != 0 {
+		t.Fatalf("expected DisabledGlobalEffects cleared, got %v", app.plan.DisabledGlobalEffects)
+	}
+	if !tt.HasText("[全星系] 临时配发：轨道凝固汽油弹火力网 #1194") {
+		t.Fatalf("expected restored global effect chip on selected planet view, texts: %v", tt.Texts())
+	}
+	if err := tt.Click("[全星系] 临时配发：轨道凝固汽油弹火力网 #1194"); err != nil {
+		t.Fatalf("click per-planet cancel failed: %v", err)
+	}
+	if !slices.Equal(app.draft.DisabledNativeEffects, []int{1194}) {
+		t.Fatalf("expected per-planet DisabledNativeEffects [1194], got %v", app.draft.DisabledNativeEffects)
+	}
+}
+
+func TestUIEffectFilterGroupsCoverAllCatalogGroups(t *testing.T) {
+	t.Setenv("HD2_STRAIN_LAB_PROFILE", t.TempDir())
+
+	app, err := NewApp()
+	if err != nil {
+		t.Fatalf("NewApp failed: %v", err)
+	}
+	defer app.stopProxy()
+
+	for _, eff := range app.galaxy.Effects {
+		if !slices.Contains(effectFilterGroups, eff.GroupLabel) {
+			t.Fatalf("effect #%d (%q) groupLabel %q is not reachable in UI effectFilterGroups", eff.ID, eff.Name, eff.GroupLabel)
+		}
+	}
+}
+
+func TestUIViewCollapsiblePlanetNavAndLeftEffectPicker(t *testing.T) {
+	t.Setenv("HD2_STRAIN_LAB_PROFILE", t.TempDir())
+
+	app, err := NewApp()
+	if err != nil {
+		t.Fatalf("NewApp failed: %v", err)
+	}
+	defer app.stopProxy()
+
+	tt := ui.NewTester(app.View, 1280, 760)
+	if !app.showPlanetNav {
+		t.Fatalf("expected showPlanetNav=true initially")
+	}
+	if !tt.HasText("SUPER EARTH") || !tt.HasText("克伦达斯II") || !tt.HasText("星系效果与变种（请先选中星球）") {
+		t.Fatalf("expected planet nav and left effect picker visible initially, texts=%v", tt.Texts())
+	}
+
+	// Select planet #1 so draft editing is active
+	if err := tt.Click("克伦达斯II"); err != nil {
+		t.Fatalf("click planet #1 failed: %v", err)
+	}
+	firstEff := app.galaxy.Effects[0]
+	rExpanded, okExp := tt.Find(firstEff.Name)
+	if !okExp {
+		t.Fatalf("expected effect row %q visible when nav expanded", firstEff.Name)
+	}
+
+	// Collapse planet nav -> planet list hidden, effect picker expands upward
+	if err := tt.Click("收起"); err != nil {
+		t.Fatalf("click 收起 failed: %v", err)
+	}
+	if app.showPlanetNav {
+		t.Fatalf("expected showPlanetNav=false after 收起")
+	}
+	if tt.HasText("SUPER EARTH") || !tt.HasText("▶ 星球导航") {
+		t.Fatalf("expected planet list hidden when collapsed")
+	}
+	rCollapsed, okCol := tt.Find(firstEff.Name)
+	if !okCol {
+		t.Fatalf("expected effect row %q visible when nav collapsed", firstEff.Name)
+	}
+	if rCollapsed.Y >= rExpanded.Y {
+		t.Fatalf("expected effect picker to expand upward after collapsing nav: collapsedY=%.1f expandedY=%.1f", rCollapsed.Y, rExpanded.Y)
+	}
+
+	// Expand planet nav again
+	if err := tt.Click("展开"); err != nil {
+		t.Fatalf("click 展开 failed: %v", err)
+	}
+	if !app.showPlanetNav || !tt.HasText("SUPER EARTH") || !tt.HasText("▼ 星球导航") {
+		t.Fatalf("expected planet nav restored after 展开")
+	}
+
+	// Verify dedicated 兵种激增 chip vs 敌情与变种 chip
+	if err := tt.Click("兵种激增"); err != nil {
+		t.Fatalf("click 兵种激增 failed: %v", err)
+	}
+	if !tt.HasText("移动工厂激增 (+50% 生成)") {
+		t.Fatalf("expected surge effect in 兵种激增 group")
+	}
+	if err := tt.Click("敌情与变种"); err != nil {
+		t.Fatalf("click 敌情与变种 failed: %v", err)
+	}
+	if !tt.HasText("掠食变种") {
+		t.Fatalf("expected strain effect in 敌情与变种 group")
+	}
+	if tt.HasText("移动工厂激增 (+50% 生成)") {
+		t.Fatalf("did not expect surge effect in 敌情与变种 group")
+	}
 }
 
 

@@ -113,7 +113,11 @@ func (s *Server) SeedWarData(warID int, warInfoPlain, effectsPlain []byte) {
 func (s *Server) UpdatePlan(plan config.Plan) {
 	s.mu.Lock()
 	s.plan = plan
-	s.stats.LastMessage = fmt.Sprintf("配置已更新（%d 颗启用星球），等待游戏下次刷新战况", countEnabled(plan))
+	if len(plan.DisabledGlobalEffects) > 0 {
+		s.stats.LastMessage = fmt.Sprintf("配置已更新（%d 颗启用星球，%d 项全局取消效果），等待游戏下次刷新战况", countEnabled(plan), len(plan.DisabledGlobalEffects))
+	} else {
+		s.stats.LastMessage = fmt.Sprintf("配置已更新（%d 颗启用星球），等待游戏下次刷新战况", countEnabled(plan))
+	}
 	s.appendLogLocked(s.stats.LastMessage)
 	s.mu.Unlock()
 	s.notify()
@@ -651,13 +655,18 @@ func (s *Server) handleStatusRewrite(plain []byte) ([]byte, bool) {
 		s.stats.Rewrites++
 		s.stats.LastRewriteAt = time.Now()
 		s.stats.AppliedPlanDigest = plan.Digest()
-		s.stats.LastMessage = fmt.Sprintf("已下发改写 #%d（%d 颗星球，+%d / -%d 效果，共 %d 处变更）",
-			s.stats.Rewrites, summary.PlanetsPatched, summary.EffectsAdded, summary.EffectsRemoved, summary.ChangedCount)
+		if summary.PlanetsPatched == 0 {
+			s.stats.LastMessage = fmt.Sprintf("已下发改写 #%d（全局效果 -%d，共 %d 处变更）",
+				s.stats.Rewrites, summary.EffectsRemoved, summary.ChangedCount)
+		} else {
+			s.stats.LastMessage = fmt.Sprintf("已下发改写 #%d（%d 颗星球，+%d / -%d 效果，共 %d 处变更）",
+				s.stats.Rewrites, summary.PlanetsPatched, summary.EffectsAdded, summary.EffectsRemoved, summary.ChangedCount)
+		}
 		s.appendLogLocked(s.stats.LastMessage)
 		go s.notify()
 		return patched, true
 	}
-	if countEnabled(plan) == 0 {
+	if countEnabled(plan) == 0 && len(plan.DisabledGlobalEffects) == 0 {
 		s.stats.LastMessage = fmt.Sprintf("收到战况 Status（已启用 0 颗星球，透传原样）")
 	} else {
 		s.stats.LastMessage = fmt.Sprintf("收到战况 Status（配置已生效或无需新增变更）")
