@@ -1,0 +1,54 @@
+name: Build Windows
+
+on:
+  push:
+    branches:
+      - 'main'
+  pull_request:
+    branches:
+      - 'main'
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    name: Vet, Test & Build Windows Executable
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run vet and unit tests
+        shell: pwsh
+        run: |
+          go vet ./...
+          go test -count=1 -skip TestRefreshFromLiveAPI ./...
+
+      - name: Build Windows executable
+        shell: pwsh
+        run: |
+          go build -ldflags="-H windowsgui -s -w" -o hd2-strain-lab.exe .
+          $hash = (Get-FileHash .\hd2-strain-lab.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  hd2-strain-lab.exe" | Out-File -Encoding ascii SHA256SUMS.txt
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hd2-strain-lab-windows-amd64
+          path: |
+            hd2-strain-lab.exe
+            SHA256SUMS.txt
+          retention-days: 30
+          if-no-files-found: error

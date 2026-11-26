@@ -28,6 +28,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: true
 
       - name: Run vet and unit tests
         run: |
@@ -40,13 +41,18 @@ jobs:
           $hash = (Get-FileHash .\hd2-strain-lab.exe -Algorithm SHA256).Hash.ToLower()
           "$hash  hd2-strain-lab.exe" | Out-File -Encoding ascii SHA256SUMS.txt
 
-      - name: Create GitHub Release
+      - name: Create or Update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "${{ github.event.inputs.tag || github.ref_name }}"
-          gh release create "$tag" `
-            --title "HD2 Strain Lab $tag" `
-            --notes-file CHANGELOG.md `
-            .\hd2-strain-lab.exe `
-            .\SHA256SUMS.txt
+          gh release view "$tag" *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload "$tag" .\hd2-strain-lab.exe .\SHA256SUMS.txt --clobber
+          } else {
+            gh release create "$tag" `
+              --title "HD2 Strain Lab $tag" `
+              --notes-file CHANGELOG.md `
+              .\hd2-strain-lab.exe `
+              .\SHA256SUMS.txt
+          }
