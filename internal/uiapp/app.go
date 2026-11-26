@@ -19,6 +19,25 @@ import (
 	"hd2-strain-lab/internal/proxy"
 )
 
+type DockSide string
+
+const (
+	DockLeft  DockSide = "left"
+	DockRight DockSide = "right"
+)
+
+type PanelID string
+
+const (
+	PanelPlanetNav    PanelID = "planet_nav"
+	PanelEffectPicker PanelID = "effect_picker"
+	PanelConsole      PanelID = "console"
+)
+
+type panelDragPayload struct {
+	Panel PanelID
+}
+
 type App struct {
 	win        *mygo.Window
 	theme      *ui.Theme
@@ -32,6 +51,13 @@ type App struct {
 
 	starMap     *StarMapState
 	selectedIDs []int
+
+	// Docked layout state
+	leftSidebarW       float32
+	rightSidebarW      float32
+	panelSides         map[PanelID]DockSide
+	draggingPanel      PanelID
+	frameDraggingPanel PanelID
 
 	// Left navigator state
 	showPlanetNav   bool
@@ -83,6 +109,11 @@ func NewApp() (*App, error) {
 		return nil, err
 	}
 
+	panelSides := make(map[PanelID]DockSide, 3)
+	for k, v := range config.NormalizePanelSides(settings.PanelSides) {
+		panelSides[PanelID(k)] = DockSide(v)
+	}
+
 	app := &App{
 		theme:         NewHD2Theme(),
 		profileDir:    profileDir,
@@ -91,6 +122,9 @@ func NewApp() (*App, error) {
 		settings:      settings,
 		certsMgr:      cm,
 		starMap:       NewStarMapState(),
+		leftSidebarW:  float32(config.NormalizeSidebarWidth(settings.LeftSidebarWidth, config.DefaultLeftSidebarWidth)),
+		rightSidebarW: float32(config.NormalizeSidebarWidth(settings.RightSidebarWidth, config.DefaultRightSidebarWidth)),
+		panelSides:    panelSides,
 		showPlanetNav: true,
 		effectGroup:   "全部",
 	}
@@ -152,6 +186,119 @@ func (a *App) setFontScale(next float64) {
 	a.proxySrv.UpdateSettings(a.settings)
 }
 
+func (a *App) panelSide(id PanelID) DockSide {
+	if a.panelSides != nil {
+		if side, ok := a.panelSides[id]; ok && (side == DockLeft || side == DockRight) {
+			return side
+		}
+	}
+	if id == PanelConsole {
+		return DockRight
+	}
+	return DockLeft
+}
+
+func (a *App) panelsOnSide(side DockSide) []PanelID {
+	order := []PanelID{PanelPlanetNav, PanelConsole, PanelEffectPicker}
+	out := make([]PanelID, 0, len(order))
+	for _, id := range order {
+		if a.panelSide(id) == side {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+func (a *App) dockPanel(id PanelID, side DockSide) {
+	if a.panelSide(id) == side {
+		return
+	}
+	if a.panelSides == nil {
+		a.panelSides = map[PanelID]DockSide{}
+	}
+	a.panelSides[id] = side
+	a.persistLayoutSettings()
+	if side == DockLeft {
+		a.toastMsg = "已吸附到左侧"
+	} else {
+		a.toastMsg = "已吸附到右侧"
+	}
+}
+
+func (a *App) clampSidebarWidth(w, winW float32) float32 {
+	if w < float32(config.MinSidebarWidth) {
+		w = float32(config.MinSidebarWidth)
+	}
+	if w > float32(config.MaxSidebarWidth) {
+		w = float32(config.MaxSidebarWidth)
+	}
+	if winW > 0 {
+		maxAllowed := max(float32(config.MinSidebarWidth), winW-260)
+		if w > maxAllowed {
+			w = maxAllowed
+		}
+	}
+	return float32(math.Round(float64(w)))
+}
+
+func (a *App) computeSidebarWidths(winW float32, showLeft, showRight bool) (leftW, rightW float32) {
+	leftPanels := a.panelsOnSide(DockLeft)
+	rightPanels := a.panelsOnSide(DockRight)
+	if showLeft {
+		if len(leftPanels) == 0 {
+			leftW = 120
+		} else {
+			leftW = a.clampSidebarWidth(a.leftSidebarW, winW)
+		}
+	}
+	if showRight {
+		if len(rightPanels) == 0 {
+			rightW = 120
+		} else {
+			rightW = a.clampSidebarWidth(a.rightSidebarW, winW)
+		}
+	}
+	if showLeft && showRight && winW > 0 {
+		handlesW := float32(0)
+		if len(leftPanels) > 0 {
+			handlesW += 6
+		}
+		if len(rightPanels) > 0 {
+			handlesW += 6
+		}
+		avail := winW - 240 - handlesW
+		if avail > 0 && leftW+rightW > avail {
+			scale := avail / (leftW + rightW)
+			leftW = float32(math.Floor(float64(leftW * scale)))
+			rightW = float32(math.Floor(float64(rightW * scale)))
+		}
+	}
+	return leftW, rightW
+}
+
+func (a *App) persistLayoutSettings() {
+	a.settings.LeftSidebarWidth = config.NormalizeSidebarWidth(float64(a.leftSidebarW), config.DefaultLeftSidebarWidth)
+	a.settings.RightSidebarWidth = config.NormalizeSidebarWidth(float64(a.rightSidebarW), config.DefaultRightSidebarWidth)
+	rawSides := make(map[string]string, 3)
+	for _, id := range []PanelID{PanelPlanetNav, PanelEffectPicker, PanelConsole} {
+		rawSides[string(id)] = string(a.panelSide(id))
+	}
+	a.settings.PanelSides = config.NormalizePanelSides(rawSides)
+	_ = config.SaveSettings(a.profileDir, a.settings)
+}
+
+func (a *App) resetLayoutSettings() {
+	a.leftSidebarW = float32(config.DefaultLeftSidebarWidth)
+	a.rightSidebarW = float32(config.DefaultRightSidebarWidth)
+	a.panelSides = map[PanelID]DockSide{
+		PanelPlanetNav:    DockLeft,
+		PanelEffectPicker: DockLeft,
+		PanelConsole:      DockRight,
+	}
+	a.showPlanetNav = true
+	a.persistLayoutSettings()
+}
+
 func (a *App) View(c *ui.Context) {
 	a.theme.FontSize = a.fs(13)
 	c.SetTheme(a.theme)
@@ -160,14 +307,34 @@ func (a *App) View(c *ui.Context) {
 		a.toastMsg = ""
 	}
 
+	winW, _ := c.Size()
+	leftPanels := a.panelsOnSide(DockLeft)
+	rightPanels := a.panelsOnSide(DockRight)
+	showLeft := len(leftPanels) > 0 || a.draggingPanel != ""
+	showRight := len(rightPanels) > 0 || a.draggingPanel != ""
+	leftW, rightW := a.computeSidebarWidths(winW, showLeft, showRight)
+	a.frameDraggingPanel = ""
+
 	ui.Column(c).Fill().Background(BgDeep).Children(func() {
 		a.buildHeader(c)
 		ui.Row(c).Grow(1).FillWidth().Children(func() {
-			a.buildLeftNavigator(c)
+			if showLeft {
+				a.buildDockSidebar(c, DockLeft, leftW, leftPanels, winW)
+			}
+			if len(leftPanels) > 0 {
+				a.buildResizeHandle(c, "resize-left", DockLeft, winW)
+			}
 			a.buildStarMap(c)
-			a.buildRightConsole(c)
+			if len(rightPanels) > 0 {
+				a.buildResizeHandle(c, "resize-right", DockRight, winW)
+			}
+			if showRight {
+				a.buildDockSidebar(c, DockRight, rightW, rightPanels, winW)
+			}
 		})
 	})
+
+	a.draggingPanel = a.frameDraggingPanel
 }
 
 func (a *App) buildHeader(c *ui.Context) {

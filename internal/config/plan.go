@@ -64,13 +64,23 @@ type Plan struct {
 	DisabledGlobalEffects []int          `json:"disabled_global_effects,omitempty"`
 }
 
+const (
+	DefaultLeftSidebarWidth  = 312.0
+	DefaultRightSidebarWidth = 348.0
+	MinSidebarWidth          = 220.0
+	MaxSidebarWidth          = 560.0
+)
+
 // Settings stores non-sensitive local application preferences.
 type Settings struct {
-	UseUpstreamProxy bool    `json:"use_upstream_proxy"`
-	UpstreamProxyURL string  `json:"upstream_proxy_url"` // e.g. http://127.0.0.1:7890
-	BindPort         int     `json:"bind_port"`          // 0 = ephemeral loopback port
-	AllowAllEffects  bool    `json:"allow_all_effects"`  // Allow dispatching catalog effects even before live /GalacticWarEffects is seen (useful for offline/experimental)
-	FontScale        float64 `json:"font_scale,omitempty"`
+	UseUpstreamProxy  bool              `json:"use_upstream_proxy"`
+	UpstreamProxyURL  string            `json:"upstream_proxy_url"` // e.g. http://127.0.0.1:7890
+	BindPort          int               `json:"bind_port"`          // 0 = ephemeral loopback port
+	AllowAllEffects   bool              `json:"allow_all_effects"`  // Allow dispatching catalog effects even before live /GalacticWarEffects is seen (useful for offline/experimental)
+	FontScale         float64           `json:"font_scale,omitempty"`
+	LeftSidebarWidth  float64           `json:"left_sidebar_width,omitempty"`
+	RightSidebarWidth float64           `json:"right_sidebar_width,omitempty"`
+	PanelSides        map[string]string `json:"panel_sides,omitempty"`
 }
 
 // NormalizeFontScale clamps a UI font scale factor to [0.80, 1.50], defaulting <= 0 to 1.0.
@@ -87,13 +97,53 @@ func NormalizeFontScale(v float64) float64 {
 	return math.Round(v*100) / 100
 }
 
+// NormalizeSidebarWidth clamps a sidebar width to [MinSidebarWidth, MaxSidebarWidth], falling back if invalid or <= 0.
+func NormalizeSidebarWidth(v, fallback float64) float64 {
+	if math.IsNaN(v) || math.IsInf(v, 0) || v <= 0 {
+		return fallback
+	}
+	if v < MinSidebarWidth {
+		v = MinSidebarWidth
+	}
+	if v > MaxSidebarWidth {
+		v = MaxSidebarWidth
+	}
+	return math.Round(v)
+}
+
+// DefaultPanelSides returns the default left/right docking side for each panel.
+func DefaultPanelSides() map[string]string {
+	return map[string]string{
+		"planet_nav":    "left",
+		"effect_picker": "left",
+		"console":       "right",
+	}
+}
+
+// NormalizePanelSides fills defaults and retains only valid ("left"/"right") panel docking assignments.
+func NormalizePanelSides(in map[string]string) map[string]string {
+	out := DefaultPanelSides()
+	for k, v := range in {
+		if _, known := out[k]; !known {
+			continue
+		}
+		if v == "left" || v == "right" {
+			out[k] = v
+		}
+	}
+	return out
+}
+
 func DefaultSettings() Settings {
 	return Settings{
-		UseUpstreamProxy: false,
-		UpstreamProxyURL: "",
-		BindPort:         0,
-		AllowAllEffects:  false,
-		FontScale:        1.0,
+		UseUpstreamProxy:  false,
+		UpstreamProxyURL:  "",
+		BindPort:          0,
+		AllowAllEffects:   false,
+		FontScale:         1.0,
+		LeftSidebarWidth:  DefaultLeftSidebarWidth,
+		RightSidebarWidth: DefaultRightSidebarWidth,
+		PanelSides:        DefaultPanelSides(),
 	}
 }
 
@@ -386,6 +436,9 @@ func LoadSettings(profileDir string) (Settings, error) {
 		return DefaultSettings(), err
 	}
 	s.FontScale = NormalizeFontScale(s.FontScale)
+	s.LeftSidebarWidth = NormalizeSidebarWidth(s.LeftSidebarWidth, DefaultLeftSidebarWidth)
+	s.RightSidebarWidth = NormalizeSidebarWidth(s.RightSidebarWidth, DefaultRightSidebarWidth)
+	s.PanelSides = NormalizePanelSides(s.PanelSides)
 	return s, nil
 }
 

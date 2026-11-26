@@ -678,5 +678,126 @@ func TestUIViewCollapsiblePlanetNavAndLeftEffectPicker(t *testing.T) {
 	}
 }
 
+func TestUIViewSidebarDragResizeAndPersistence(t *testing.T) {
+	prof := t.TempDir()
+	t.Setenv("HD2_STRAIN_LAB_PROFILE", prof)
+
+	app, err := NewApp()
+	if err != nil {
+		t.Fatalf("NewApp failed: %v", err)
+	}
+	defer app.stopProxy()
+
+	tt := ui.NewTester(app.View, 1380, 860)
+	left0 := app.leftSidebarW
+	right0 := app.rightSidebarW
+
+	// Drag left resize handle right by 80px
+	lx := left0 + 3
+	tt.Press(lx, 400)
+	tt.Move(lx+20, 400)
+	tt.Move(lx+50, 400)
+	tt.Move(lx+80, 400)
+	tt.Release(lx+80, 400)
+
+	if app.leftSidebarW <= left0+40 {
+		t.Fatalf("expected leftSidebarW to grow after dragging right: before=%.1f after=%.1f", left0, app.leftSidebarW)
+	}
+
+	// Drag right resize handle left by 60px
+	rx := float32(1380) - right0 - 3
+	tt.Press(rx, 400)
+	tt.Move(rx-20, 400)
+	tt.Move(rx-40, 400)
+	tt.Move(rx-60, 400)
+	tt.Release(rx-60, 400)
+
+	if app.rightSidebarW <= right0+30 {
+		t.Fatalf("expected rightSidebarW to grow after dragging left: before=%.1f after=%.1f", right0, app.rightSidebarW)
+	}
+
+	loaded, err := config.LoadSettings(prof)
+	if err != nil {
+		t.Fatalf("LoadSettings failed: %v", err)
+	}
+	if loaded.LeftSidebarWidth != float64(app.leftSidebarW) || loaded.RightSidebarWidth != float64(app.rightSidebarW) {
+		t.Fatalf("expected persisted widths (%v, %v), got (%v, %v)", app.leftSidebarW, app.rightSidebarW, loaded.LeftSidebarWidth, loaded.RightSidebarWidth)
+	}
+
+	// Reset via proxy settings button
+	if err := tt.Click("代理下发与连接"); err != nil {
+		t.Fatalf("switch to proxy tab failed: %v", err)
+	}
+	if err := tt.Click("重置界面布局"); err != nil {
+		t.Fatalf("click 重置界面布局 failed: %v", err)
+	}
+	if app.leftSidebarW != float32(config.DefaultLeftSidebarWidth) || app.rightSidebarW != float32(config.DefaultRightSidebarWidth) {
+		t.Fatalf("expected widths reset to defaults, got left=%.1f right=%.1f", app.leftSidebarW, app.rightSidebarW)
+	}
+}
+
+func TestUIViewDragPanelBetweenLeftAndRightSidebars(t *testing.T) {
+	prof := t.TempDir()
+	t.Setenv("HD2_STRAIN_LAB_PROFILE", prof)
+
+	app, err := NewApp()
+	if err != nil {
+		t.Fatalf("NewApp failed: %v", err)
+	}
+	defer app.stopProxy()
+
+	tt := ui.NewTester(app.View, 1380, 860)
+
+	rStart, ok := tt.Find("⋮⋮ 星系效果与变种（请先选中星球）")
+	if !ok {
+		t.Fatalf("expected effect picker header visible, texts=%v", tt.Texts())
+	}
+	if app.panelSide(PanelEffectPicker) != DockLeft || rStart.X >= 400 {
+		t.Fatalf("expected effect picker initially on left side, side=%s rect=%+v", app.panelSide(PanelEffectPicker), rStart)
+	}
+
+	// Drag effect picker header from left sidebar to right sidebar
+	sx := rStart.X + rStart.W/2
+	sy := rStart.Y + rStart.H/2
+	tt.Press(sx, sy)
+	tt.Move(sx+30, sy)
+	tt.Move(700, 300)
+	tt.Move(1200, 300)
+	tt.Release(1200, 300)
+
+	if app.panelSide(PanelEffectPicker) != DockRight {
+		t.Fatalf("expected effect picker docked to right side after drag, got %s", app.panelSide(PanelEffectPicker))
+	}
+	rRight, okR := tt.Find("⋮⋮ 星系效果与变种（请先选中星球）")
+	if !okR || rRight.X <= 700 {
+		t.Fatalf("expected effect picker header rendered on right side (>700), got ok=%v rect=%+v", okR, rRight)
+	}
+
+	loaded, err := config.LoadSettings(prof)
+	if err != nil {
+		t.Fatalf("LoadSettings failed: %v", err)
+	}
+	if loaded.PanelSides["effect_picker"] != "right" {
+		t.Fatalf("expected persisted PanelSides[effect_picker]=right, got %v", loaded.PanelSides)
+	}
+
+	// Drag effect picker header back from right sidebar to left sidebar
+	rx := rRight.X + rRight.W/2
+	ry := rRight.Y + rRight.H/2
+	tt.Press(rx, ry)
+	tt.Move(rx-30, ry)
+	tt.Move(700, 300)
+	tt.Move(150, 300)
+	tt.Release(150, 300)
+
+	if app.panelSide(PanelEffectPicker) != DockLeft {
+		t.Fatalf("expected effect picker docked back to left side, got %s", app.panelSide(PanelEffectPicker))
+	}
+	rLeft, okL := tt.Find("⋮⋮ 星系效果与变种（请先选中星球）")
+	if !okL || rLeft.X >= 400 {
+		t.Fatalf("expected effect picker header back on left side (<400), got ok=%v rect=%+v", okL, rLeft)
+	}
+}
+
 
 

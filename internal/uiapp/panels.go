@@ -28,147 +28,263 @@ var (
 	}
 )
 
-func (a *App) buildLeftNavigator(c *ui.Context) {
-	_, winH := c.Size()
-	ui.Column(c).Width(312*a.panelScale(0.95, 1.20)).FillHeight().Background(BgMid).BorderWidth(0, 1, 0, 0).BorderColor(BorderSub).Padding(10).Gap(8).Children(func() {
-		if !a.showPlanetNav {
-			ui.Row(c).Shrink(0).FillWidth().Padding(8, 10).Radius(8).Background(BgCard).Border(1, BorderSub).
-				AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
-				hdr := ui.Row(c.Key("toggle-planet-nav")).Grow(1).Gap(6).AlignItems(ui.Center).Cursor(ui.CursorPointer).Children(func() {
-					ui.Text(c, "▶ 星球导航").FontSize(a.fs(12.5)).Bold().TextColor(HD2Gold)
-					ui.Textf(c, "%d 颗", len(a.galaxy.Planets)).FontSize(a.fs(11)).TextColor(TextMute)
-				})
-				if hdr.Clicked() {
-					a.showPlanetNav = true
-				}
-				if ui.Button(c.Key("btn-toggle-planet-nav"), "展开").Clicked() {
-					a.showPlanetNav = true
-				}
-			})
+func (a *App) buildResizeHandle(c *ui.Context, key string, side DockSide, winW float32) {
+	h := ui.Box(c.Key(key)).Width(6).FillHeight().Shrink(0).Cursor(ui.CursorResizeColumn)
+	dx, _, held := h.Dragged()
+	if held && dx != 0 {
+		if side == DockLeft {
+			a.leftSidebarW = a.clampSidebarWidth(a.leftSidebarW+dx, winW)
 		} else {
-			var navH float32
-			if len(a.selectedIDs) == 0 {
-				navH = 260
-				if winH > 0 {
-					navH = min(float32(340), max(float32(210), winH*0.40))
-				}
-			} else {
-				navH = 210
-				if winH > 0 {
-					navH = min(float32(240), max(float32(170), winH*0.28))
-				}
-			}
-
-			ui.Column(c).Shrink(0).FillWidth().Height(navH).Clip().Padding(8).Gap(6).Radius(8).Background(BgCard).Border(1, BorderSub).Children(func() {
-				ui.Row(c).Shrink(0).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
-					hdr := ui.Row(c.Key("toggle-planet-nav")).Grow(1).Gap(6).AlignItems(ui.Center).Cursor(ui.CursorPointer).Children(func() {
-						ui.Text(c, "▼ 星球导航").FontSize(a.fs(12.5)).Bold().TextColor(HD2Gold)
-						ui.Textf(c, "%d 颗", len(a.galaxy.Planets)).FontSize(a.fs(11)).TextColor(TextMute)
-					})
-					if hdr.Clicked() {
-						a.showPlanetNav = false
-					}
-					if ui.Button(c.Key("btn-toggle-planet-nav"), "收起").Clicked() {
-						a.showPlanetNav = false
-					}
-				})
-
-				ui.SearchField(c.Key("planet-search"), &a.planetQuery).Placeholder("名称 / 英文 / ID / 星区").FillWidth().Shrink(0)
-
-				// Filter pills
-				ui.Row(c).Shrink(0).Wrap().Gap(4).Children(func() {
-					for i, lbl := range planetFilterLabels {
-						active := a.planetFilter == i
-						btn := ui.Box(c.Key(fmt.Sprintf("pf-%d", i))).Padding(3, 8).Radius(999).Cursor(ui.CursorPointer)
-						if active {
-							btn.Background(HD2GoldDim).Border(1, HD2Gold)
-						} else {
-							btn.Background(BgMid).Border(1, BorderSub)
-						}
-						btn.Children(func() {
-							col := TextDim
-							if active {
-								col = HD2Gold
-							}
-							ui.Text(c, lbl).FontSize(a.fs(11)).TextColor(col)
-						})
-						if btn.Clicked() {
-							a.planetFilter = i
-						}
-					}
-				})
-
-				filtered := a.filteredPlanets()
-				targetMap := a.targetMap()
-				selSet := make(map[int]bool, len(a.selectedIDs))
-				for _, id := range a.selectedIDs {
-					selSet[id] = true
-				}
-
-				ui.List(c.Key("planet-list"), &a.planetListState, len(filtered)).Grow(1).FillWidth().KeepScrollbars(true).
-					ItemKey(func(i int) any { return filtered[i].ID }).
-					Rows(func(row ui.ListRow) {
-						pl := filtered[row.Index]
-						isSel := selSet[pl.ID]
-						tgt, hasTgt := targetMap[pl.ID]
-
-						r := ui.Row(row.Context).FillWidth().Padding(6, 8).Gap(8).AlignItems(ui.Center).Radius(6).Cursor(ui.CursorPointer)
-						if isSel {
-							r.Background(ui.RGBA(81, 217, 199, 0.16)).Border(1, CyanActive.Alpha(0.75))
-						} else if row.Hovered() {
-							r.Background(BgCardHover)
-						}
-						r.Children(func() {
-							ui.Box(row.Context).Size(8, 8).Radius(4).Background(FactionColor(pl.Owner)).Shrink(0)
-							ui.Column(row.Context).Grow(1).Gap(1).Children(func() {
-								ui.Row(row.Context).AlignItems(ui.Center).Gap(4).Children(func() {
-									ui.Text(row.Context, pl.DisplayName()).FontSize(a.fs(12)).Bold().TextColor(TextPrimary)
-									ui.Textf(row.Context, "#%d", pl.ID).FontSize(a.fs(10)).TextColor(TextMute)
-								})
-								sub := pl.SectorZH
-								if sub != "" {
-									sub += "星区"
-								}
-								if pl.NameEN != "" {
-									if sub != "" {
-										sub += " · "
-									}
-									sub += pl.NameEN
-								}
-								ui.Text(row.Context, sub).FontSize(a.fs(10)).TextColor(TextMute)
-							})
-							if hasTgt {
-								badgeCol := CyanActive
-								txt := "已配"
-								if !tgt.Enabled {
-									badgeCol = TextMute
-									txt = "暂停"
-								}
-								ui.Box(row.Context).Padding(2, 6).Radius(999).Background(badgeCol.Alpha(0.18)).Border(1, badgeCol.Alpha(0.65)).Children(func() {
-									ui.Text(row.Context, txt).FontSize(a.fs(10)).TextColor(badgeCol)
-								})
-							} else if pl.IsDefense {
-								ui.Box(row.Context).Padding(2, 5).Radius(999).Background(RedDanger.Alpha(0.2)).Children(func() {
-									ui.Text(row.Context, "防").FontSize(a.fs(10)).TextColor(RedDanger)
-								})
-							} else if pl.HasCampaign {
-								ui.Textf(row.Context, "%.0f%%", pl.LiberationPct()).FontSize(a.fs(10)).TextColor(HD2Gold)
-							}
-						})
-						if r.Clicked() {
-							a.handleMapSelect(pl.ID, c.Modifiers())
-							a.starMap.FocusPlanet(pl)
-						}
-					})
-			})
+			a.rightSidebarW = a.clampSidebarWidth(a.rightSidebarW-dx, winW)
 		}
-
-		a.buildEffectPickerCard(c)
+	}
+	if _, _, ended := h.DragEnded(); ended {
+		a.persistLayoutSettings()
+	}
+	if h.DoubleClicked() {
+		if side == DockLeft {
+			a.leftSidebarW = float32(config.DefaultLeftSidebarWidth)
+		} else {
+			a.rightSidebarW = float32(config.DefaultRightSidebarWidth)
+		}
+		a.persistLayoutSettings()
+	}
+	h.Draw(func(p *ui.Painter, r ui.Rect) {
+		p.Fill(r, BgDeep, 0)
+		lineW := float32(1)
+		col := BorderSub
+		if held || h.Hovered() {
+			lineW = 2
+			col = CyanActive
+		}
+		p.Fill(ui.Rect{X: r.X + (r.W-lineW)/2, Y: r.Y, W: lineW, H: r.H}, col, 0)
 	})
 }
 
-func (a *App) buildRightConsole(c *ui.Context) {
-	ui.Column(c).Width(348*a.panelScale(0.95, 1.20)).FillHeight().Background(BgMid).BorderWidth(0, 0, 0, 1).BorderColor(BorderSub).Padding(12).Gap(10).Children(func() {
+func (a *App) attachPanelDrag(el ui.Element, panel PanelID, winW float32) {
+	el.Cursor(ui.CursorGrab).Drag(panelDragPayload{Panel: panel})
+	if el.Dragging() {
+		a.frameDraggingPanel = panel
+	}
+	if pt, missed := el.DragMissed(); missed && winW > 0 {
+		if pt.X >= winW*0.55 {
+			a.dockPanel(panel, DockRight)
+		} else if pt.X <= winW*0.45 {
+			a.dockPanel(panel, DockLeft)
+		}
+	}
+}
+
+func (a *App) buildDockSidebar(c *ui.Context, side DockSide, width float32, panels []PanelID, winW float32) {
+	col := ui.Column(c.Key("dock-" + string(side))).Width(width).FillHeight().Shrink(0).Background(BgMid).Padding(10).Gap(8)
+	overPayload, isOver := ui.DragOver[panelDragPayload](col)
+	if dropPayload, dropped := ui.Drop[panelDragPayload](col); dropped {
+		a.dockPanel(dropPayload.Panel, side)
+	}
+	showDropBanner := isOver && a.panelSide(overPayload.Panel) != side
+	if showDropBanner {
+		col.Border(2, CyanActive)
+	} else if side == DockLeft {
+		col.BorderWidth(0, 1, 0, 0).BorderColor(BorderSub)
+	} else {
+		col.BorderWidth(0, 0, 0, 1).BorderColor(BorderSub)
+	}
+
+	col.Children(func() {
+		if showDropBanner {
+			lbl := "松手吸附到左侧"
+			if side == DockRight {
+				lbl = "松手吸附到右侧"
+			}
+			ui.Box(c.Key("drop-banner-"+string(side))).Shrink(0).FillWidth().Padding(6, 10).Radius(6).
+				Background(CyanActive.Alpha(0.18)).Border(1, CyanActive).Center().Children(func() {
+				ui.Text(c, lbl).FontSize(a.fs(11.5)).Bold().TextColor(CyanBright)
+			})
+		}
+
+		if len(panels) == 0 {
+			hint := "拖到此处吸附到左侧"
+			if side == DockRight {
+				hint = "拖到此处吸附到右侧"
+			}
+			ui.Box(c.Key("drop-empty-"+string(side))).Grow(1).FillWidth().Padding(10).Radius(8).
+				Background(BgCard.Alpha(0.5)).Border(1, CyanActive.Alpha(0.5)).Center().Children(func() {
+				ui.Text(c, hint).FontSize(a.fs(11)).TextColor(CyanActive)
+			})
+			return
+		}
+
+		alone := len(panels) == 1
+		for _, pid := range panels {
+			switch pid {
+			case PanelPlanetNav:
+				a.buildPlanetNavCard(c, alone, winW)
+			case PanelConsole:
+				a.buildConsoleCard(c, winW)
+			case PanelEffectPicker:
+				a.buildEffectPickerCard(c, winW)
+			}
+		}
+	})
+}
+
+func (a *App) buildPlanetNavCard(c *ui.Context, alone bool, winW float32) {
+	_, winH := c.Size()
+	if !a.showPlanetNav {
+		ui.Row(c.Key("planet-nav-card")).Shrink(0).FillWidth().Padding(8, 10).Radius(8).Background(BgCard).Border(1, BorderSub).
+			AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
+			hdr := ui.Row(c.Key("toggle-planet-nav")).Grow(1).Gap(6).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, "⋮⋮ ▶ 星球导航").FontSize(a.fs(12.5)).Bold().TextColor(HD2Gold)
+				ui.Textf(c, "%d 颗", len(a.galaxy.Planets)).FontSize(a.fs(11)).TextColor(TextMute)
+			})
+			a.attachPanelDrag(hdr, PanelPlanetNav, winW)
+			if hdr.Clicked() {
+				a.showPlanetNav = true
+			}
+			if ui.Button(c.Key("btn-toggle-planet-nav"), "展开").Clicked() {
+				a.showPlanetNav = true
+			}
+		})
+		return
+	}
+
+	card := ui.Column(c.Key("planet-nav-card")).FillWidth().Clip().Padding(8).Gap(6).Radius(8).Background(BgCard).Border(1, BorderSub)
+	if alone {
+		card.Grow(1).MinHeight(180)
+	} else {
+		var navH float32
+		if len(a.selectedIDs) == 0 {
+			navH = 260
+			if winH > 0 {
+				navH = min(float32(340), max(float32(210), winH*0.40))
+			}
+		} else {
+			navH = 210
+			if winH > 0 {
+				navH = min(float32(240), max(float32(170), winH*0.28))
+			}
+		}
+		card.Shrink(0).Height(navH)
+	}
+
+	card.Children(func() {
+		ui.Row(c).Shrink(0).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
+			hdr := ui.Row(c.Key("toggle-planet-nav")).Grow(1).Gap(6).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, "⋮⋮ ▼ 星球导航").FontSize(a.fs(12.5)).Bold().TextColor(HD2Gold)
+				ui.Textf(c, "%d 颗", len(a.galaxy.Planets)).FontSize(a.fs(11)).TextColor(TextMute)
+			})
+			a.attachPanelDrag(hdr, PanelPlanetNav, winW)
+			if hdr.Clicked() {
+				a.showPlanetNav = false
+			}
+			if ui.Button(c.Key("btn-toggle-planet-nav"), "收起").Clicked() {
+				a.showPlanetNav = false
+			}
+		})
+
+		ui.SearchField(c.Key("planet-search"), &a.planetQuery).Placeholder("名称 / 英文 / ID / 星区").FillWidth().Shrink(0)
+
+		// Filter pills
+		ui.Row(c).Shrink(0).Wrap().Gap(4).Children(func() {
+			for i, lbl := range planetFilterLabels {
+				active := a.planetFilter == i
+				btn := ui.Box(c.Key(fmt.Sprintf("pf-%d", i))).Padding(3, 8).Radius(999).Cursor(ui.CursorPointer)
+				if active {
+					btn.Background(HD2GoldDim).Border(1, HD2Gold)
+				} else {
+					btn.Background(BgMid).Border(1, BorderSub)
+				}
+				btn.Children(func() {
+					col := TextDim
+					if active {
+						col = HD2Gold
+					}
+					ui.Text(c, lbl).FontSize(a.fs(11)).TextColor(col)
+				})
+				if btn.Clicked() {
+					a.planetFilter = i
+				}
+			}
+		})
+
+		filtered := a.filteredPlanets()
+		targetMap := a.targetMap()
+		selSet := make(map[int]bool, len(a.selectedIDs))
+		for _, id := range a.selectedIDs {
+			selSet[id] = true
+		}
+
+		ui.List(c.Key("planet-list"), &a.planetListState, len(filtered)).Grow(1).FillWidth().KeepScrollbars(true).
+			ItemKey(func(i int) any { return filtered[i].ID }).
+			Rows(func(row ui.ListRow) {
+				pl := filtered[row.Index]
+				isSel := selSet[pl.ID]
+				tgt, hasTgt := targetMap[pl.ID]
+
+				r := ui.Row(row.Context).FillWidth().Padding(6, 8).Gap(8).AlignItems(ui.Center).Radius(6).Cursor(ui.CursorPointer)
+				if isSel {
+					r.Background(ui.RGBA(81, 217, 199, 0.16)).Border(1, CyanActive.Alpha(0.75))
+				} else if row.Hovered() {
+					r.Background(BgCardHover)
+				}
+				r.Children(func() {
+					ui.Box(row.Context).Size(8, 8).Radius(4).Background(FactionColor(pl.Owner)).Shrink(0)
+					ui.Column(row.Context).Grow(1).Gap(1).Children(func() {
+						ui.Row(row.Context).AlignItems(ui.Center).Gap(4).Children(func() {
+							ui.Text(row.Context, pl.DisplayName()).FontSize(a.fs(12)).Bold().TextColor(TextPrimary)
+							ui.Textf(row.Context, "#%d", pl.ID).FontSize(a.fs(10)).TextColor(TextMute)
+						})
+						sub := pl.SectorZH
+						if sub != "" {
+							sub += "星区"
+						}
+						if pl.NameEN != "" {
+							if sub != "" {
+								sub += " · "
+							}
+							sub += pl.NameEN
+						}
+						ui.Text(row.Context, sub).FontSize(a.fs(10)).TextColor(TextMute)
+					})
+					if hasTgt {
+						badgeCol := CyanActive
+						txt := "已配"
+						if !tgt.Enabled {
+							badgeCol = TextMute
+							txt = "暂停"
+						}
+						ui.Box(row.Context).Padding(2, 6).Radius(999).Background(badgeCol.Alpha(0.18)).Border(1, badgeCol.Alpha(0.65)).Children(func() {
+							ui.Text(row.Context, txt).FontSize(a.fs(10)).TextColor(badgeCol)
+						})
+					} else if pl.IsDefense {
+						ui.Box(row.Context).Padding(2, 5).Radius(999).Background(RedDanger.Alpha(0.2)).Children(func() {
+							ui.Text(row.Context, "防").FontSize(a.fs(10)).TextColor(RedDanger)
+						})
+					} else if pl.HasCampaign {
+						ui.Textf(row.Context, "%.0f%%", pl.LiberationPct()).FontSize(a.fs(10)).TextColor(HD2Gold)
+					}
+				})
+				if r.Clicked() {
+					a.handleMapSelect(pl.ID, c.Modifiers())
+					a.starMap.FocusPlanet(pl)
+				}
+			})
+	})
+}
+
+func (a *App) buildConsoleCard(c *ui.Context, winW float32) {
+	ui.Column(c.Key("console-card")).Grow(1).FillWidth().MinHeight(180).Gap(8).Children(func() {
+		dragBar := ui.Row(c.Key("drag-console-hdr")).Shrink(0).FillWidth().Padding(5, 8).Radius(6).
+			Background(BgCard).Border(1, BorderSub).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
+			ui.Text(c, "⋮⋮ 控制台（长按拖动可吸附左右）").FontSize(a.fs(11)).Bold().TextColor(TextDim)
+			sideLbl := "左侧"
+			if a.panelSide(PanelConsole) == DockRight {
+				sideLbl = "右侧"
+			}
+			ui.Text(c, sideLbl).FontSize(a.fs(10)).TextColor(TextMute)
+		})
+		a.attachPanelDrag(dragBar, PanelConsole, winW)
+
 		ui.Segmented(c.Key("right-tabs"), &a.rightTab, "星球变种配置", "代理下发与连接").FillWidth()
 
 		if a.rightTab == 0 {
@@ -686,16 +802,19 @@ func (a *App) buildCampaignConfigCard(c *ui.Context) {
 	})
 }
 
-func (a *App) buildEffectPickerCard(c *ui.Context) {
-	// Effect Catalog Picker (placed in left sidebar below collapsible planet navigator)
-	picker := ui.Column(c.Key("eff-picker-card")).Grow(1).FillWidth().Clip().Padding(8).Gap(6).Radius(8).Background(BgCard).Border(1, BorderSub)
+func (a *App) buildEffectPickerCard(c *ui.Context, winW float32) {
+	// Effect Catalog Picker (draggable between left and right sidebars)
+	picker := ui.Column(c.Key("eff-picker-card")).Grow(1).FillWidth().MinHeight(160).Clip().Padding(8).Gap(6).Radius(8).Background(BgCard).Border(1, BorderSub)
 	picker.Children(func() {
 		ui.Row(c).Shrink(0).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
-			hdr := "星系效果与变种（请先选中星球）"
+			hdrText := "⋮⋮ 星系效果与变种（请先选中星球）"
 			if len(a.selectedIDs) > 0 {
-				hdr = fmt.Sprintf("星系效果与变种 (%d 已选)", len(a.draft.Effects))
+				hdrText = fmt.Sprintf("⋮⋮ 星系效果与变种 (%d 已选)", len(a.draft.Effects))
 			}
-			ui.Text(c, hdr).FontSize(a.fs(12.5)).Bold().TextColor(HD2Gold)
+			hdr := ui.Row(c.Key("drag-eff-hdr")).Grow(1).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, hdrText).FontSize(a.fs(12.5)).Bold().TextColor(HD2Gold)
+			})
+			a.attachPanelDrag(hdr, PanelEffectPicker, winW)
 			if len(a.selectedIDs) > 0 && len(a.draft.Effects) > 0 {
 				if ui.Button(c.Key("clr-eff"), "清空效果").Clicked() {
 					a.draft.Effects = nil
@@ -1008,6 +1127,14 @@ func (a *App) buildProxyTab(c *ui.Context) {
 						if btn.Clicked() {
 							a.setFontScale(pr.scale)
 						}
+					}
+				})
+
+				ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
+					ui.Text(c, "面板与侧栏布局").FontSize(a.fs(11.5)).TextColor(TextPrimary)
+					if ui.Button(c.Key("cfg-reset-layout"), "重置界面布局").Clicked() {
+						a.resetLayoutSettings()
+						c.Toast("已重置左右栏宽度与面板位置")
 					}
 				})
 
