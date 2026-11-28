@@ -619,3 +619,75 @@ func TestRewriteEffectsCustomValuesAndSafety(t *testing.T) {
 		t.Fatalf("expected wrapped #1191 values[1]=250, got %d", got)
 	}
 }
+
+func TestRewriteStatusPrunesStaleCampaignAndDefenseState(t *testing.T) {
+	defensePlan := config.Plan{
+		Schema: 2,
+		Targets: []config.PlanetTarget{
+			{
+				Planet:        0,
+				Enabled:       true,
+				Effects:       []int{1142},
+				Owner:         1,
+				Campaign:      true,
+				CampaignType:  4,
+				CampaignRace:  2,
+				CampaignCount: 20,
+				DefenseSource: 78,
+				DefenseLevel:  25,
+				DefenseHours:  48,
+				DefenseCount:  38,
+			},
+		},
+	}
+
+	ctx := &RewriteContext{
+		AllowAllEffects: true,
+		CampaignIDs:     make(map[int]int),
+		DefenseStates:   make(map[int]DefenseState),
+	}
+
+	if _, summary, err := RewriteStatus(assets.StatusSampleJSON, defensePlan, ctx); err != nil || summary.ChangedCount == 0 {
+		t.Fatalf("initial defense RewriteStatus failed: summary=%+v err=%v", summary, err)
+	}
+	if _, ok := ctx.CampaignIDs[0]; !ok {
+		t.Fatalf("expected CampaignIDs[0] populated")
+	}
+	if _, ok := ctx.DefenseStates[0]; !ok {
+		t.Fatalf("expected DefenseStates[0] populated")
+	}
+
+	// Switch to non-defense liberation on planet 0 -> DefenseStates[0] must be pruned.
+	libPlan := config.Plan{
+		Schema: 2,
+		Targets: []config.PlanetTarget{
+			{
+				Planet:        0,
+				Enabled:       true,
+				Effects:       []int{1142},
+				Owner:         2,
+				Campaign:      true,
+				CampaignType:  0,
+				CampaignRace:  2,
+				CampaignCount: 20,
+			},
+		},
+	}
+	if _, _, err := RewriteStatus(assets.StatusSampleJSON, libPlan, ctx); err != nil {
+		t.Fatalf("liberation RewriteStatus failed: %v", err)
+	}
+	if _, ok := ctx.DefenseStates[0]; ok {
+		t.Fatalf("expected DefenseStates[0] pruned after leaving defense mode, got %+v", ctx.DefenseStates)
+	}
+	if _, ok := ctx.CampaignIDs[0]; !ok {
+		t.Fatalf("expected CampaignIDs[0] retained while campaign still active")
+	}
+
+	// Empty plan -> both CampaignIDs and DefenseStates must be cleared.
+	if _, _, err := RewriteStatus(assets.StatusSampleJSON, config.Plan{Schema: 2}, ctx); err != nil {
+		t.Fatalf("empty plan RewriteStatus failed: %v", err)
+	}
+	if len(ctx.CampaignIDs) != 0 || len(ctx.DefenseStates) != 0 {
+		t.Fatalf("expected CampaignIDs and DefenseStates cleared, got campaigns=%+v defense=%+v", ctx.CampaignIDs, ctx.DefenseStates)
+	}
+}

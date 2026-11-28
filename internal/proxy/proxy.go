@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -52,6 +53,7 @@ type Stats struct {
 // api.live.prod.thehelldiversgame.com:443 while tunneling all other traffic untouched.
 type Server struct {
 	mu       sync.RWMutex
+	rwMu     sync.Mutex
 	certs    *certs.Manager
 	ln       net.Listener
 	running  bool
@@ -89,7 +91,7 @@ func NewServer(cm *certs.Manager, plan config.Plan, settings config.Settings, on
 	}
 	return &Server{
 		certs:              cm,
-		plan:               plan,
+		plan:               plan.Clone(),
 		settings:           settings,
 		rwCtx:              rwCtx,
 		onUpdate:           onUpdate,
@@ -119,20 +121,55 @@ func (s *Server) SetOnLiveEffects(fn func(raw []byte)) {
 	s.mu.Unlock()
 }
 
+func (s *Server) pruneContextLocked() {
+	if s.rwCtx == nil {
+		return
+	}
+	targets, err := config.NormalizeTargets(s.plan)
+	if err != nil {
+		if countEnabled(s.plan) == 0 {
+			clear(s.rwCtx.CampaignIDs)
+			clear(s.rwCtx.DefenseStates)
+		}
+		return
+	}
+	keepCampaign := make(map[int]bool, len(targets))
+	keepDefense := make(map[int]bool, len(targets))
+	for _, t := range targets {
+		if t.Campaign {
+			keepCampaign[t.Planet] = true
+			if t.CampaignType == 4 {
+				keepDefense[t.Planet] = true
+			}
+		}
+	}
+	for pid := range s.rwCtx.CampaignIDs {
+		if !keepCampaign[pid] {
+			delete(s.rwCtx.CampaignIDs, pid)
+		}
+	}
+	for pid := range s.rwCtx.DefenseStates {
+		if !keepDefense[pid] {
+			delete(s.rwCtx.DefenseStates, pid)
+		}
+	}
+}
+
 func (s *Server) UpdatePlan(plan config.Plan) {
 	s.mu.Lock()
-	s.plan = plan
+	s.plan = plan.Clone()
+	s.pruneContextLocked()
 	var extras []string
-	if len(plan.DisabledGlobalEffects) > 0 {
-		extras = append(extras, fmt.Sprintf("%d 项全局取消效果", len(plan.DisabledGlobalEffects)))
+	if len(s.plan.DisabledGlobalEffects) > 0 {
+		extras = append(extras, fmt.Sprintf("%d 项全局取消效果", len(s.plan.DisabledGlobalEffects)))
 	}
-	if len(plan.EffectValueOverrides) > 0 {
-		extras = append(extras, fmt.Sprintf("%d 项自定义数值覆盖", len(plan.EffectValueOverrides)))
+	if len(s.plan.EffectValueOverrides) > 0 {
+		extras = append(extras, fmt.Sprintf("%d 项自定义数值覆盖", len(s.plan.EffectValueOverrides)))
 	}
 	if len(extras) > 0 {
-		s.stats.LastMessage = fmt.Sprintf("配置已更新（%d 颗启用星球，%s），等待游戏下次刷新", countEnabled(plan), strings.Join(extras, "，"))
+		s.stats.LastMessage = fmt.Sprintf("配置已更新（%d 颗启用星球，%s），等待游戏下次刷新", countEnabled(s.plan), strings.Join(extras, "，"))
 	} else {
-		s.stats.LastMessage = fmt.Sprintf("配置已更新（%d 颗启用星球），等待游戏下次刷新战况", countEnabled(plan))
+		s.stats.LastMessage = fmt.Sprintf("配置已更新（%d 颗启用星球），等待游戏下次刷新战况", countEnabled(s.plan))
 	}
 	s.appendLogLocked(s.stats.LastMessage)
 	s.mu.Unlock()
@@ -480,6 +517,9 @@ func (s *Server) handleTargetMITM(clientConn net.Conn, br *bufio.Reader) {
 		rebuilt := false
 
 		if resp.StatusCode == http.StatusOK && req.Method == http.MethodGet && (isStatus || isWarInfo || isEffects) {
+			if isStatus || isEffects {
+				disableResponseCaching(resp)
+			}
 			plain, wasGz, errGz := maybeGunzip(rawBody, resp.Header.Get("Content-Encoding"))
 			if errGz == nil {
 				switch {
@@ -498,9 +538,6 @@ func (s *Server) handleTargetMITM(clientConn net.Conn, br *bufio.Reader) {
 						if wasGz {
 							resp.Header.Del("Content-Encoding")
 						}
-						resp.Header.Del("ETag")
-						resp.Header.Del("Content-MD5")
-						resp.Header.Del("Digest")
 						resp.Header.Del("Transfer-Encoding")
 						resp.Header.Set("Content-Length", strconv.Itoa(len(outBody)))
 						resp.ContentLength = int64(len(outBody))
@@ -522,9 +559,6 @@ func (s *Server) handleTargetMITM(clientConn net.Conn, br *bufio.Reader) {
 						if wasGz {
 							resp.Header.Del("Content-Encoding")
 						}
-						resp.Header.Del("ETag")
-						resp.Header.Del("Content-MD5")
-						resp.Header.Del("Digest")
 						resp.Header.Del("Transfer-Encoding")
 						resp.Header.Set("Content-Length", strconv.Itoa(len(outBody)))
 						resp.ContentLength = int64(len(outBody))
@@ -583,9 +617,19 @@ func (s *Server) handleObservedEffects(plain []byte) {
 	s.notify()
 }
 
+func disableResponseCaching(resp *http.Response) {
+	resp.Header.Del("ETag")
+	resp.Header.Del("Last-Modified")
+	resp.Header.Del("Expires")
+	resp.Header.Del("Pragma")
+	resp.Header.Del("Content-MD5")
+	resp.Header.Del("Digest")
+	resp.Header.Set("Cache-Control", "no-store, no-cache, must-revalidate")
+}
+
 func (s *Server) handleEffectsRewrite(plain []byte) ([]byte, bool) {
 	s.mu.RLock()
-	plan := s.plan
+	plan := s.plan.Clone()
 	s.mu.RUnlock()
 
 	if len(plan.EffectValueOverrides) == 0 {
@@ -698,16 +742,52 @@ func (s *Server) ensureFreshRegionReference(transport *http.Transport, statusPat
 }
 
 func (s *Server) handleStatusRewrite(plain []byte) ([]byte, bool) {
+	s.rwMu.Lock()
+	defer s.rwMu.Unlock()
+
+	incomingWarID := 0
+	if doc, err := decodeJSONObject(plain); err == nil {
+		if wid, ok := asInt(doc["warId"]); ok && wid > 0 {
+			incomingWarID = wid
+		}
+	}
+
 	s.mu.Lock()
-	plan := s.plan
-	ctx := s.rwCtx
+	plan := s.plan.Clone()
+	prevWarID := s.stats.WarID
+	if incomingWarID > 0 && prevWarID > 0 && incomingWarID != prevWarID {
+		clear(s.rwCtx.CampaignIDs)
+		clear(s.rwCtx.DefenseStates)
+	}
+	localCtx := &RewriteContext{
+		AllowedEffects:  maps.Clone(s.rwCtx.AllowedEffects),
+		EffectTypes:     maps.Clone(s.rwCtx.EffectTypes),
+		AllowAllEffects: s.rwCtx.AllowAllEffects,
+		RegionReference: s.rwCtx.RegionReference,
+		CampaignIDs:     maps.Clone(s.rwCtx.CampaignIDs),
+		DefenseStates:   maps.Clone(s.rwCtx.DefenseStates),
+	}
+	if localCtx.CampaignIDs == nil {
+		localCtx.CampaignIDs = make(map[int]int)
+	}
+	if localCtx.DefenseStates == nil {
+		localCtx.DefenseStates = make(map[int]DefenseState)
+	}
 	s.stats.StatusHits++
 	s.mu.Unlock()
 
-	patched, summary, err := RewriteStatus(plain, plan, ctx)
+	planDigest := plan.Digest()
+	patched, summary, err := RewriteStatus(plain, plan, localCtx)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if incomingWarID > 0 {
+		s.stats.WarID = incomingWarID
+	}
+	if s.plan.Digest() == planDigest {
+		s.rwCtx.CampaignIDs = localCtx.CampaignIDs
+		s.rwCtx.DefenseStates = localCtx.DefenseStates
+	}
 	if err != nil {
 		s.stats.LastMessage = "战况改写跳过: " + err.Error()
 		s.appendLogLocked(s.stats.LastMessage)
@@ -717,7 +797,7 @@ func (s *Server) handleStatusRewrite(plain []byte) ([]byte, bool) {
 	if summary.ChangedCount > 0 {
 		s.stats.Rewrites++
 		s.stats.LastRewriteAt = time.Now()
-		s.stats.AppliedPlanDigest = plan.Digest()
+		s.stats.AppliedPlanDigest = planDigest
 		if summary.PlanetsPatched == 0 {
 			s.stats.LastMessage = fmt.Sprintf("已下发改写 #%d（全局效果 -%d，共 %d 处变更）",
 				s.stats.Rewrites, summary.EffectsRemoved, summary.ChangedCount)

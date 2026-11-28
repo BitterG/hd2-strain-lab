@@ -74,6 +74,7 @@ type App struct {
 
 	// Draft target being edited for selected planet(s)
 	draft          config.PlanetTarget
+	draftBase      config.PlanetTarget
 	draftOwnerStr  string
 	draftTypeStr   string
 	draftRaceStr   string
@@ -161,6 +162,9 @@ func NewApp() (*App, error) {
 func (a *App) AttachWindow(win *mygo.Window) {
 	a.win = win
 	win.OnClose(func(_ *mygo.CloseEvent) {
+		if a.draftDirty() {
+			_ = a.applyDraftToSelection(nil)
+		}
 		a.stopProxy()
 	})
 	a.triggerLiveRefresh()
@@ -527,6 +531,55 @@ func (a *App) syncDraftFromSelection() {
 			a.showCampaignCfg = pl != nil && (!pl.HasCampaign || pl.HasNativeRegions)
 		}
 	}
+	a.draftBase = a.draft.Clone()
+}
+
+func normalizedTargetForCompare(t config.PlanetTarget) config.PlanetTarget {
+	cp := t.Clone()
+	cp.Planet = 0
+	if cp.CampaignCount <= 0 {
+		cp.CampaignCount = 20
+	}
+	if cp.DefenseLevel <= 0 {
+		cp.DefenseLevel = 20
+	}
+	if cp.DefenseHours <= 0 {
+		cp.DefenseHours = 48
+	}
+	if cp.DefenseCount <= 0 {
+		cp.DefenseCount = 38
+	}
+	slices.Sort(cp.Effects)
+	slices.Sort(cp.DisabledNativeEffects)
+	return cp
+}
+
+func planetTargetEqual(x, y config.PlanetTarget) bool {
+	nx := normalizedTargetForCompare(x)
+	ny := normalizedTargetForCompare(y)
+	return nx.Enabled == ny.Enabled &&
+		nx.Owner == ny.Owner &&
+		nx.Campaign == ny.Campaign &&
+		nx.ForceOpen == ny.ForceOpen &&
+		nx.CampaignType == ny.CampaignType &&
+		nx.CampaignRace == ny.CampaignRace &&
+		nx.CampaignCount == ny.CampaignCount &&
+		nx.OpenRegions == ny.OpenRegions &&
+		nx.InitializeRegions == ny.InitializeRegions &&
+		nx.DefenseSource == ny.DefenseSource &&
+		nx.DefenseLevel == ny.DefenseLevel &&
+		nx.DefenseHours == ny.DefenseHours &&
+		nx.DefenseCount == ny.DefenseCount &&
+		nx.Note == ny.Note &&
+		slices.Equal(nx.Effects, ny.Effects) &&
+		slices.Equal(nx.DisabledNativeEffects, ny.DisabledNativeEffects)
+}
+
+func (a *App) draftDirty() bool {
+	if len(a.selectedIDs) == 0 {
+		return false
+	}
+	return !planetTargetEqual(a.draft, a.draftBase)
 }
 
 func (a *App) selectedHasNativeRegions() bool {
@@ -592,57 +645,69 @@ func (a *App) isGlobalEffectDisabled(eid int) bool {
 }
 
 func (a *App) toggleDisableGlobalEffect(eid int) error {
-	if idx := slices.Index(a.plan.DisabledGlobalEffects, eid); idx >= 0 {
-		a.plan.DisabledGlobalEffects = slices.Delete(a.plan.DisabledGlobalEffects, idx, idx+1)
+	candidate := a.plan.Clone()
+	if idx := slices.Index(candidate.DisabledGlobalEffects, eid); idx >= 0 {
+		candidate.DisabledGlobalEffects = slices.Delete(candidate.DisabledGlobalEffects, idx, idx+1)
 	} else {
-		a.plan.DisabledGlobalEffects = append(a.plan.DisabledGlobalEffects, eid)
+		candidate.DisabledGlobalEffects = append(candidate.DisabledGlobalEffects, eid)
 	}
-	slices.Sort(a.plan.DisabledGlobalEffects)
-	return a.saveAndDispatch()
+	slices.Sort(candidate.DisabledGlobalEffects)
+	return a.commitPlan(candidate)
 }
 
 func (a *App) disableAllGlobalEffects(ids []int) error {
+	candidate := a.plan.Clone()
 	for _, eid := range ids {
-		if !slices.Contains(a.plan.DisabledGlobalEffects, eid) {
-			a.plan.DisabledGlobalEffects = append(a.plan.DisabledGlobalEffects, eid)
+		if !slices.Contains(candidate.DisabledGlobalEffects, eid) {
+			candidate.DisabledGlobalEffects = append(candidate.DisabledGlobalEffects, eid)
 		}
 	}
-	slices.Sort(a.plan.DisabledGlobalEffects)
-	return a.saveAndDispatch()
+	slices.Sort(candidate.DisabledGlobalEffects)
+	return a.commitPlan(candidate)
 }
 
 func (a *App) restoreAllGlobalEffects() error {
-	a.plan.DisabledGlobalEffects = nil
-	return a.saveAndDispatch()
+	candidate := a.plan.Clone()
+	candidate.DisabledGlobalEffects = nil
+	return a.commitPlan(candidate)
 }
 
 func (a *App) setEffectValueOverride(eid, val int) error {
-	if a.plan.EffectValueOverrides == nil {
-		a.plan.EffectValueOverrides = make(map[int]int)
+	candidate := a.plan.Clone()
+	if candidate.EffectValueOverrides == nil {
+		candidate.EffectValueOverrides = make(map[int]int)
 	}
-	a.plan.EffectValueOverrides[eid] = val
-	return a.saveAndDispatch()
+	candidate.EffectValueOverrides[eid] = val
+	return a.commitPlan(candidate)
 }
 
 func (a *App) clearEffectValueOverride(eid int) error {
-	if a.plan.EffectValueOverrides != nil {
-		delete(a.plan.EffectValueOverrides, eid)
-		if len(a.plan.EffectValueOverrides) == 0 {
-			a.plan.EffectValueOverrides = nil
+	candidate := a.plan.Clone()
+	if candidate.EffectValueOverrides != nil {
+		delete(candidate.EffectValueOverrides, eid)
+		if len(candidate.EffectValueOverrides) == 0 {
+			candidate.EffectValueOverrides = nil
 		}
+	}
+	if err := a.commitPlan(candidate); err != nil {
+		return err
 	}
 	if a.valueOverrideInputs != nil {
 		delete(a.valueOverrideInputs, eid)
 	}
-	return a.saveAndDispatch()
+	return nil
 }
 
 func (a *App) clearAllEffectValueOverrides() error {
-	a.plan.EffectValueOverrides = nil
+	candidate := a.plan.Clone()
+	candidate.EffectValueOverrides = nil
+	if err := a.commitPlan(candidate); err != nil {
+		return err
+	}
 	if a.valueOverrideInputs != nil {
 		clear(a.valueOverrideInputs)
 	}
-	return a.saveAndDispatch()
+	return nil
 }
 
 func (a *App) editableNumericEffectsForSelection() []int {
@@ -812,35 +877,41 @@ func (a *App) applyDraftToSelection(c *ui.Context) error {
 	}
 	tm := a.targetMap()
 	for _, pid := range a.selectedIDs {
-		t := a.draft
+		t := a.draft.Clone()
 		t.Planet = pid
-		t.Effects = append([]int(nil), a.draft.Effects...)
-		t.DisabledNativeEffects = append([]int(nil), a.draft.DisabledNativeEffects...)
 		tm[pid] = t
 	}
-	return a.commitTargetMap(tm)
+	if err := a.commitTargetMap(tm); err != nil {
+		return err
+	}
+	a.draftBase = a.draft.Clone()
+	return nil
+}
+
+func (a *App) dispatchCurrent(c *ui.Context) (appliedDraft bool, err error) {
+	if len(a.selectedIDs) > 0 && a.draftDirty() {
+		return true, a.applyDraftToSelection(c)
+	}
+	return false, a.saveAndDispatch()
 }
 
 func (a *App) commitTargetMap(tm map[int]config.PlanetTarget) error {
 	nextTargets := make([]config.PlanetTarget, 0, len(tm))
 	for _, t := range tm {
-		nextTargets = append(nextTargets, t)
+		nextTargets = append(nextTargets, t.Clone())
 	}
 	slices.SortFunc(nextTargets, func(x, y config.PlanetTarget) int {
 		return x.Planet - y.Planet
 	})
-	var clonedOverrides map[int]int
-	if len(a.plan.EffectValueOverrides) > 0 {
-		clonedOverrides = make(map[int]int, len(a.plan.EffectValueOverrides))
-		for k, v := range a.plan.EffectValueOverrides {
-			clonedOverrides[k] = v
-		}
-	}
-	candidate := config.Plan{
-		Schema:                2,
-		Targets:               nextTargets,
-		DisabledGlobalEffects: append([]int(nil), a.plan.DisabledGlobalEffects...),
-		EffectValueOverrides:  clonedOverrides,
+	candidate := a.plan.Clone()
+	candidate.Schema = 2
+	candidate.Targets = nextTargets
+	return a.commitPlan(candidate)
+}
+
+func (a *App) commitPlan(candidate config.Plan) error {
+	if candidate.Schema == 0 {
+		candidate.Schema = 2
 	}
 	if _, err := config.NormalizeTargets(candidate); err != nil {
 		return err
@@ -851,65 +922,74 @@ func (a *App) commitTargetMap(tm map[int]config.PlanetTarget) error {
 	if _, err := config.NormalizeEffectValueOverrides(candidate); err != nil {
 		return err
 	}
-	a.plan = candidate
-	return a.saveAndDispatch()
+	if err := config.SavePlan(a.profileDir, candidate); err != nil {
+		return err
+	}
+	a.plan = candidate.Clone()
+	a.proxySrv.UpdatePlan(a.plan)
+	return nil
 }
 
-func (a *App) removeSelectionTargets() {
+func (a *App) removeSelectionTargets() error {
 	if len(a.selectedIDs) == 0 {
-		return
+		return nil
 	}
 	sel := make(map[int]bool, len(a.selectedIDs))
 	for _, id := range a.selectedIDs {
 		sel[id] = true
 	}
-	kept := make([]config.PlanetTarget, 0, len(a.plan.Targets))
-	for _, t := range a.plan.Targets {
+	candidate := a.plan.Clone()
+	kept := make([]config.PlanetTarget, 0, len(candidate.Targets))
+	for _, t := range candidate.Targets {
 		if !sel[t.Planet] {
 			kept = append(kept, t)
 		}
 	}
-	a.plan.Targets = kept
+	candidate.Targets = kept
+	if err := a.commitPlan(candidate); err != nil {
+		return err
+	}
 	a.syncDraftFromSelection()
-	_ = a.saveAndDispatch()
+	return nil
 }
 
-func (a *App) setTargetEnabled(pid int, enabled bool) {
-	for i := range a.plan.Targets {
-		if a.plan.Targets[i].Planet == pid {
-			a.plan.Targets[i].Enabled = enabled
+func (a *App) setTargetEnabled(pid int, enabled bool) error {
+	candidate := a.plan.Clone()
+	for i := range candidate.Targets {
+		if candidate.Targets[i].Planet == pid {
+			candidate.Targets[i].Enabled = enabled
 			break
 		}
 	}
-	_ = a.saveAndDispatch()
+	if err := a.commitPlan(candidate); err != nil {
+		return err
+	}
+	if slices.Contains(a.selectedIDs, pid) {
+		a.syncDraftFromSelection()
+	}
+	return nil
 }
 
-func (a *App) deleteTarget(pid int) {
-	kept := make([]config.PlanetTarget, 0, len(a.plan.Targets))
-	for _, t := range a.plan.Targets {
+func (a *App) deleteTarget(pid int) error {
+	candidate := a.plan.Clone()
+	kept := make([]config.PlanetTarget, 0, len(candidate.Targets))
+	for _, t := range candidate.Targets {
 		if t.Planet != pid {
 			kept = append(kept, t)
 		}
 	}
-	a.plan.Targets = kept
-	_ = a.saveAndDispatch()
+	candidate.Targets = kept
+	if err := a.commitPlan(candidate); err != nil {
+		return err
+	}
+	if slices.Contains(a.selectedIDs, pid) {
+		a.syncDraftFromSelection()
+	}
+	return nil
 }
 
 func (a *App) saveAndDispatch() error {
-	if _, err := config.NormalizeTargets(a.plan); err != nil {
-		return err
-	}
-	if _, err := config.NormalizeDisabledGlobalEffects(a.plan); err != nil {
-		return err
-	}
-	if _, err := config.NormalizeEffectValueOverrides(a.plan); err != nil {
-		return err
-	}
-	if err := config.SavePlan(a.profileDir, a.plan); err != nil {
-		return err
-	}
-	a.proxySrv.UpdatePlan(a.plan)
-	return nil
+	return a.commitPlan(a.plan.Clone())
 }
 
 func (a *App) importPlanBytes(raw []byte) error {

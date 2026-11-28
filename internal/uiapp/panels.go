@@ -345,21 +345,35 @@ func (a *App) buildSelectedSummaryCard(c *ui.Context) {
 						ui.Text(c, sub).FontSize(a.fs(11)).TextColor(TextDim)
 					}
 				})
-				if owner > 0 {
-					fc := FactionColor(owner)
-					lbl := fmt.Sprintf("%s · %.1f%%", catalog.FactionNameZH(owner), lib)
-					if pl != nil && pl.IsDefense {
-						fc = RedDanger
-						lbl = fmt.Sprintf("防守战 · %.1f%%", lib)
+				ui.Row(c).AlignItems(ui.Center).Gap(6).Children(func() {
+					if a.draftDirty() {
+						ui.Box(c).Padding(2, 7).Radius(999).Background(HD2GoldDim).Border(1, HD2Gold.Alpha(0.75)).Children(func() {
+							ui.Text(c, "未保存").FontSize(a.fs(10)).Bold().TextColor(HD2Gold)
+						})
 					}
-					ui.Box(c).Padding(3, 8).Radius(999).Background(fc.Alpha(0.18)).Border(1, fc.Alpha(0.7)).Children(func() {
-						ui.Text(c, lbl).FontSize(a.fs(10.5)).TextColor(fc)
-					})
-				}
+					if owner > 0 {
+						fc := FactionColor(owner)
+						lbl := fmt.Sprintf("%s · %.1f%%", catalog.FactionNameZH(owner), lib)
+						if pl != nil && pl.IsDefense {
+							fc = RedDanger
+							lbl = fmt.Sprintf("防守战 · %.1f%%", lib)
+						}
+						ui.Box(c).Padding(3, 8).Radius(999).Background(fc.Alpha(0.18)).Border(1, fc.Alpha(0.7)).Children(func() {
+							ui.Text(c, lbl).FontSize(a.fs(10.5)).TextColor(fc)
+						})
+					}
+				})
 			})
 		} else {
 			ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
-				ui.Textf(c, "已批量选中 %d 颗星球", len(a.selectedIDs)).FontSize(a.fs(14)).Bold().TextColor(CyanBright)
+				ui.Row(c).AlignItems(ui.Center).Gap(6).Children(func() {
+					ui.Textf(c, "已批量选中 %d 颗星球", len(a.selectedIDs)).FontSize(a.fs(14)).Bold().TextColor(CyanBright)
+					if a.draftDirty() {
+						ui.Box(c).Padding(2, 7).Radius(999).Background(HD2GoldDim).Border(1, HD2Gold.Alpha(0.75)).Children(func() {
+							ui.Text(c, "未保存").FontSize(a.fs(10)).Bold().TextColor(HD2Gold)
+						})
+					}
+				})
 				if ui.Button(c.Key("clr-sel"), "取消多选").Clicked() {
 					a.selectedIDs = a.selectedIDs[:1]
 					a.syncDraftFromSelection()
@@ -400,8 +414,11 @@ func (a *App) buildSelectedSummaryCard(c *ui.Context) {
 			}
 			if a.anySelectedConfigured() {
 				if ui.Button(c.Key("del-sel"), "移除方案").Clicked() {
-					a.removeSelectionTargets()
-					c.Toast("已移除选中星球的变种方案")
+					if err := a.removeSelectionTargets(); err != nil {
+						c.Toast("移除失败: " + err.Error())
+					} else {
+						c.Toast("已移除选中星球的变种方案")
+					}
 				}
 			}
 		})
@@ -1021,12 +1038,31 @@ func (a *App) buildEffectPickerCard(c *ui.Context, winW float32) {
 }
 
 func (a *App) buildVariantFooter(c *ui.Context) {
-	// Compact footer showing total configured planets
+	// Compact footer showing total configured planets and global overrides
+	summary := fmt.Sprintf("总方案: %d 颗星球", len(a.plan.Targets))
+	if n := len(a.plan.DisabledGlobalEffects); n > 0 {
+		summary += fmt.Sprintf(" · 全局取消 %d", n)
+	}
+	if n := len(a.plan.EffectValueOverrides); n > 0 {
+		summary += fmt.Sprintf(" · 数值覆盖 %d", n)
+	}
+	hasAnyConfigured := len(a.plan.Targets) > 0 ||
+		len(a.plan.DisabledGlobalEffects) > 0 ||
+		len(a.plan.EffectValueOverrides) > 0
+
 	ui.Row(c).Shrink(0).AlignItems(ui.Center).Justify(ui.SpaceBetween).Padding(2, 4).Children(func() {
-		ui.Textf(c, "总方案: %d 颗星球", len(a.plan.Targets)).FontSize(a.fs(11)).TextColor(TextDim)
-		if len(a.plan.Targets) > 0 {
+		ui.Text(c, summary).FontSize(a.fs(11)).TextColor(TextDim)
+		if hasAnyConfigured {
 			if ui.Button(c.Key("view-all-cfg"), "查看全部已配置").Clicked() {
+				if a.draftDirty() {
+					if err := a.applyDraftToSelection(c); err != nil {
+						c.Toast("未保存修改校验失败: " + err.Error())
+						return
+					}
+					c.Toast("已保存当前星球修改")
+				}
 				a.selectedIDs = nil
+				a.syncDraftFromSelection()
 			}
 		}
 	})
@@ -1064,7 +1100,9 @@ func (a *App) buildConfiguredList(c *ui.Context) {
 					card.Children(func() {
 						en := t.Enabled
 						if ui.Switch(c.Key(fmt.Sprintf("tsw-%d", t.Planet)), &en).Changed() {
-							a.setTargetEnabled(t.Planet, en)
+							if err := a.setTargetEnabled(t.Planet, en); err != nil {
+								c.Toast("保存失败: " + err.Error())
+							}
 						}
 						ui.Column(c).Grow(1).Gap(2).Children(func() {
 							ui.Text(c, name).FontSize(a.fs(12)).Bold().TextColor(TextPrimary)
@@ -1078,7 +1116,9 @@ func (a *App) buildConfiguredList(c *ui.Context) {
 							}
 						}
 						if ui.Button(c.Key(fmt.Sprintf("tdel-%d", t.Planet)), "删").Clicked() {
-							a.deleteTarget(t.Planet)
+							if err := a.deleteTarget(t.Planet); err != nil {
+								c.Toast("删除失败: " + err.Error())
+							}
 						}
 					})
 				}
@@ -1117,14 +1157,23 @@ func (a *App) buildProxyTab(c *ui.Context) {
 							c.Toast("代理已停止")
 						}
 						if ui.PrimaryButton(c.Key("re-push"), "热重载下发配置").Grow(1).Clicked() {
-							if err := a.saveAndDispatch(); err != nil {
+							appliedDraft, err := a.dispatchCurrent(c)
+							if err != nil {
 								c.Toast(err.Error())
+							} else if appliedDraft {
+								c.Toast("已保存当前修改并热重载下发到代理")
 							} else {
 								c.Toast("已热重载方案到运行中的代理")
 							}
 						}
 					} else {
 						if ui.PrimaryButton(c.Key("start-px"), "启动代理服务").Grow(1).Clicked() {
+							if a.draftDirty() {
+								if err := a.applyDraftToSelection(c); err != nil {
+									c.Toast("保存当前修改失败: " + err.Error())
+									return
+								}
+							}
 							if !trusted {
 								c.Toast("提示：尚未信任本机 CA 证书，请先点击下方「安装证书信任」")
 							}

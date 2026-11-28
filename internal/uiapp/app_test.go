@@ -871,5 +871,166 @@ func TestUIViewCustomEffectValueOverrideAndPersistence(t *testing.T) {
 	}
 }
 
+func TestUIHotReloadCommitsDirtyDraftAndPersistsAcrossRestart(t *testing.T) {
+	prof := t.TempDir()
+	t.Setenv("HD2_STRAIN_LAB_PROFILE", prof)
+
+	app, err := NewApp()
+	if err != nil {
+		t.Fatalf("NewApp failed: %v", err)
+	}
+	defer app.stopProxy()
+
+	if len(app.galaxy.Effects) < 2 {
+		t.Fatalf("expected at least 2 catalog effects")
+	}
+	effA := app.galaxy.Effects[0]
+	effB := app.galaxy.Effects[1]
+
+	tt := ui.NewTester(app.View, 1380, 860)
+
+	// 1. Select planet #1, add effA, save and dispatch.
+	if err := tt.Click("克伦达斯II"); err != nil {
+		t.Fatalf("select planet #1 failed: %v", err)
+	}
+	if err := tt.Click(effA.Name); err != nil {
+		t.Fatalf("select effA failed: %v", err)
+	}
+	if err := tt.Click("保存并下发到代理"); err != nil {
+		t.Fatalf("initial save failed: %v", err)
+	}
+
+	// 2. Modify draft to replace effA with effB without clicking "保存并下发到代理".
+	if err := tt.Click(effA.Name); err != nil {
+		t.Fatalf("uncheck effA failed: %v", err)
+	}
+	if err := tt.Click(effB.Name); err != nil {
+		t.Fatalf("check effB failed: %v", err)
+	}
+	if !app.draftDirty() || !tt.HasText("未保存") {
+		t.Fatalf("expected draftDirty=true and 未保存 indicator visible")
+	}
+
+	// 3. Switch to Proxy tab, start proxy, then modify again and click "热重载下发配置".
+	if err := tt.Click("代理下发与连接"); err != nil {
+		t.Fatalf("switch to proxy tab failed: %v", err)
+	}
+	if err := tt.Click("启动代理服务"); err != nil {
+		t.Fatalf("start proxy failed: %v", err)
+	}
+	// Starting proxy should have auto-committed effB.
+	if len(app.plan.Targets) != 1 || !slices.Equal(app.plan.Targets[0].Effects, []int{effB.ID}) {
+		t.Fatalf("expected effB committed on startProxy, got %+v", app.plan.Targets)
+	}
+
+	// Switch back to variant tab, toggle effA back on (so both effB and effA), switch to proxy tab, and hot-reload.
+	if err := tt.Click("星球变种配置"); err != nil {
+		t.Fatalf("switch back to variant tab failed: %v", err)
+	}
+	if err := tt.Click(effA.Name); err != nil {
+		t.Fatalf("check effA failed: %v", err)
+	}
+	if err := tt.Click("代理下发与连接"); err != nil {
+		t.Fatalf("switch to proxy tab failed: %v", err)
+	}
+	if err := tt.Click("热重载下发配置"); err != nil {
+		t.Fatalf("click 热重载下发配置 failed: %v", err)
+	}
+	if app.draftDirty() {
+		t.Fatalf("expected draftDirty=false after hot-reload")
+	}
+
+	wantEffects := []int{effB.ID, effA.ID}
+	if len(app.plan.Targets) != 1 || !slices.Equal(app.plan.Targets[0].Effects, wantEffects) {
+		t.Fatalf("expected in-memory plan effects %v, got %+v", wantEffects, app.plan.Targets)
+	}
+
+	// Simulate app/PC restart by reloading war-targets.json from disk.
+	reloaded, err := config.LoadPlan(prof)
+	if err != nil {
+		t.Fatalf("LoadPlan failed: %v", err)
+	}
+	if len(reloaded.Targets) != 1 || !slices.Equal(reloaded.Targets[0].Effects, wantEffects) {
+		t.Fatalf("expected disk war-targets.json effects %v after restart, got %+v", wantEffects, reloaded.Targets)
+	}
+}
+
+func TestUISwitchPlanetAndViewAllAutoSavesDirtyDraft(t *testing.T) {
+	prof := t.TempDir()
+	t.Setenv("HD2_STRAIN_LAB_PROFILE", prof)
+
+	app, err := NewApp()
+	if err != nil {
+		t.Fatalf("NewApp failed: %v", err)
+	}
+	defer app.stopProxy()
+
+	effA := app.galaxy.Effects[0]
+	effB := app.galaxy.Effects[1]
+	tt := ui.NewTester(app.View, 1380, 860)
+
+	// Select planet #1 and modify draft without clicking save.
+	if err := tt.Click("克伦达斯II"); err != nil {
+		t.Fatalf("select planet #1 failed: %v", err)
+	}
+	if err := tt.Click(effA.Name); err != nil {
+		t.Fatalf("select effA failed: %v", err)
+	}
+
+	// Switch to planet #78 (克里姆西卡) -> must auto-save planet #1's dirty draft.
+	app.handleMapSelect(78, 0)
+	tt.Frame()
+	if len(app.plan.Targets) != 1 || app.plan.Targets[0].Planet != 1 || !slices.Equal(app.plan.Targets[0].Effects, []int{effA.ID}) {
+		t.Fatalf("expected planet #1 auto-saved on planet switch, got %+v", app.plan.Targets)
+	}
+
+	// Edit planet #78 draft and click "查看全部已配置" -> must auto-save planet #78 too.
+	if err := tt.Click(effB.Name); err != nil {
+		t.Fatalf("select effB on planet #78 failed: %v", err)
+	}
+	if err := tt.Click("查看全部已配置"); err != nil {
+		t.Fatalf("click 查看全部已配置 failed: %v", err)
+	}
+	if len(app.selectedIDs) != 0 {
+		t.Fatalf("expected selectedIDs cleared, got %v", app.selectedIDs)
+	}
+
+	reloaded, err := config.LoadPlan(prof)
+	if err != nil {
+		t.Fatalf("LoadPlan failed: %v", err)
+	}
+	if len(reloaded.Targets) != 2 || reloaded.Targets[0].Planet != 1 || reloaded.Targets[1].Planet != 78 {
+		t.Fatalf("expected both planets saved to disk, got %+v", reloaded.Targets)
+	}
+}
+
+func TestUIViewFooterShowsGlobalOverridesWhenNoTargets(t *testing.T) {
+	t.Setenv("HD2_STRAIN_LAB_PROFILE", t.TempDir())
+
+	app, err := NewApp()
+	if err != nil {
+		t.Fatalf("NewApp failed: %v", err)
+	}
+	defer app.stopProxy()
+
+	if err := app.setEffectValueOverride(1191, 400); err != nil {
+		t.Fatalf("setEffectValueOverride failed: %v", err)
+	}
+
+	tt := ui.NewTester(app.View, 1380, 860)
+	if err := tt.Click("克伦达斯II"); err != nil {
+		t.Fatalf("select planet #1 failed: %v", err)
+	}
+	if !tt.HasText("查看全部已配置") {
+		t.Fatalf("expected 查看全部已配置 visible when global overrides exist with 0 planet targets")
+	}
+	if err := tt.Click("查看全部已配置"); err != nil {
+		t.Fatalf("click 查看全部已配置 failed: %v", err)
+	}
+	if !tt.HasText("实验：自定义数值覆盖 (1)") {
+		t.Fatalf("expected overview global value overrides card visible")
+	}
+}
+
 
 

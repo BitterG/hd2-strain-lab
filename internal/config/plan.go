@@ -57,12 +57,41 @@ func DefaultTarget(planetID int) PlanetTarget {
 	}
 }
 
+// Clone returns a deep copy of PlanetTarget so callers cannot alias slices.
+func (t PlanetTarget) Clone() PlanetTarget {
+	cp := t
+	cp.Effects = slices.Clone(t.Effects)
+	cp.DisabledNativeEffects = slices.Clone(t.DisabledNativeEffects)
+	return cp
+}
+
 // Plan is the top-level dispatch plan sent to the proxy.
 type Plan struct {
 	Schema                int            `json:"schema"`
 	Targets               []PlanetTarget `json:"targets"`
 	DisabledGlobalEffects []int          `json:"disabled_global_effects,omitempty"`
 	EffectValueOverrides  map[int]int    `json:"effect_value_overrides,omitempty"`
+}
+
+// Clone returns a deep copy of Plan so UI and proxy never share mutable slices or maps.
+func (p Plan) Clone() Plan {
+	cp := Plan{
+		Schema:                p.Schema,
+		DisabledGlobalEffects: slices.Clone(p.DisabledGlobalEffects),
+	}
+	if p.Targets != nil {
+		cp.Targets = make([]PlanetTarget, len(p.Targets))
+		for i, t := range p.Targets {
+			cp.Targets[i] = t.Clone()
+		}
+	}
+	if len(p.EffectValueOverrides) > 0 {
+		cp.EffectValueOverrides = make(map[int]int, len(p.EffectValueOverrides))
+		for k, v := range p.EffectValueOverrides {
+			cp.EffectValueOverrides[k] = v
+		}
+	}
+	return cp
 }
 
 const (
@@ -431,6 +460,29 @@ func LoadPlan(profileDir string) (Plan, error) {
 	return p, nil
 }
 
+func writeAtomicFile(path string, data []byte) error {
+	tmp := path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
 func SavePlan(profileDir string, p Plan) error {
 	if p.Schema == 0 {
 		p.Schema = 2
@@ -439,12 +491,7 @@ func SavePlan(profileDir string, p Plan) error {
 	if err != nil {
 		return err
 	}
-	path := filepath.Join(profileDir, "war-targets.json")
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return writeAtomicFile(filepath.Join(profileDir, "war-targets.json"), b)
 }
 
 func LoadSettings(profileDir string) (Settings, error) {
@@ -472,12 +519,7 @@ func SaveSettings(profileDir string, s Settings) error {
 	if err != nil {
 		return err
 	}
-	path := filepath.Join(profileDir, "settings.json")
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return writeAtomicFile(filepath.Join(profileDir, "settings.json"), b)
 }
 
 // WriteSteamProxyINI writes the active proxy port and PID so --steam-bridge can attach.

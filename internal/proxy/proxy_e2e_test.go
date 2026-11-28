@@ -256,3 +256,137 @@ func TestProxyE2EGalacticWarEffectsRewrite(t *testing.T) {
 		t.Fatalf("expected onLiveEffects callback to receive original upstream values, got %s", string(observedRaw))
 	}
 }
+
+func TestProxyE2EHotReloadClearAndNoStoreHeaders(t *testing.T) {
+	profileDir := t.TempDir()
+	cm, err := certs.NewManager(profileDir)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	upCert, upPool := makeUpstreamTestCert(t)
+	upstream := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("ETag", `"upstream-etag"`)
+		w.Header().Set("Last-Modified", "Wed, 21 Oct 2015 07:28:00 GMT")
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		switch r.URL.Path {
+		case "/api/WarSeason/GalacticWarEffects":
+			_, _ = w.Write([]byte(`[{"id":1142,"effectType":32},{"id":1191,"effectType":72,"valueTypes":[13,2],"values":[769209189,0]}]`))
+		case "/api/WarSeason/801/Status":
+			_, _ = w.Write(assets.StatusSampleJSON)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	upstream.TLS = &tls.Config{Certificates: []tls.Certificate{upCert}}
+	upstream.StartTLS()
+	defer upstream.Close()
+
+	plan := config.Plan{
+		Schema: 2,
+		Targets: []config.PlanetTarget{
+			{
+				Planet:        0,
+				Enabled:       true,
+				Effects:       []int{1142},
+				Owner:         1,
+				Campaign:      true,
+				CampaignType:  4,
+				CampaignRace:  2,
+				CampaignCount: 20,
+				DefenseSource: 78,
+				DefenseLevel:  20,
+				DefenseHours:  48,
+				DefenseCount:  38,
+			},
+		},
+	}
+
+	srv := NewServer(cm, plan, config.DefaultSettings(), nil, nil)
+	srv.testUpstreamAddr = strings.TrimPrefix(upstream.URL, "https://")
+	srv.testRootCAs = upPool
+
+	port, err := srv.Start()
+	if err != nil {
+		t.Fatalf("proxy Start failed: %v", err)
+	}
+	defer srv.Stop()
+
+	// Mutating caller's plan slice after NewServer/UpdatePlan must not affect server plan.
+	plan.Targets[0].Effects[0] = 999999
+
+	caBytes, err := os.ReadFile(cm.CACertPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientPool := x509.NewCertPool()
+	clientPool.AppendCertsFromPEM(caBytes)
+	proxyURL, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy:           http.ProxyURL(proxyURL),
+			TLSClientConfig: &tls.Config{RootCAs: clientPool},
+		},
+		Timeout: 10 * time.Second,
+	}
+
+	// 1. Prime effects & status (rewritten response)
+	effResp, err := client.Get("https://" + certs.TargetHost + "/api/WarSeason/GalacticWarEffects")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = effResp.Body.Close()
+	if got := effResp.Header.Get("Cache-Control"); !strings.Contains(got, "no-store") {
+		t.Fatalf("expected no-store Cache-Control on GalacticWarEffects, got %q", got)
+	}
+	if effResp.Header.Get("ETag") != "" || effResp.Header.Get("Last-Modified") != "" {
+		t.Fatalf("expected ETag/Last-Modified stripped on GalacticWarEffects")
+	}
+
+	stResp, err := client.Get("https://" + certs.TargetHost + "/api/WarSeason/801/Status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stBody, _ := io.ReadAll(stResp.Body)
+	_ = stResp.Body.Close()
+	var stDoc map[string]any
+	if err := json.Unmarshal(stBody, &stDoc); err != nil {
+		t.Fatal(err)
+	}
+	if !hasPlanetEffect(stDoc, 0, 1142) {
+		t.Fatalf("expected effect 1142 on planet 0")
+	}
+	if got := stResp.Header.Get("Cache-Control"); !strings.Contains(got, "no-store") {
+		t.Fatalf("expected no-store Cache-Control on rewritten Status, got %q", got)
+	}
+
+	// 2. Clear plan -> hot reload must revert to upstream & strip caching headers even on passthrough
+	srv.UpdatePlan(config.Plan{Schema: 2})
+	srv.mu.RLock()
+	camLen, defLen := len(srv.rwCtx.CampaignIDs), len(srv.rwCtx.DefenseStates)
+	srv.mu.RUnlock()
+	if camLen != 0 || defLen != 0 {
+		t.Fatalf("expected CampaignIDs and DefenseStates pruned on UpdatePlan, got %d / %d", camLen, defLen)
+	}
+
+	stResp2, err := client.Get("https://" + certs.TargetHost + "/api/WarSeason/801/Status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stBody2, _ := io.ReadAll(stResp2.Body)
+	_ = stResp2.Body.Close()
+	var stDoc2 map[string]any
+	if err := json.Unmarshal(stBody2, &stDoc2); err != nil {
+		t.Fatal(err)
+	}
+	if hasPlanetEffect(stDoc2, 0, 1142) {
+		t.Fatalf("expected effect 1142 removed after hot-reload clear")
+	}
+	if got := stResp2.Header.Get("Cache-Control"); !strings.Contains(got, "no-store") {
+		t.Fatalf("expected no-store Cache-Control on passthrough Status after clear, got %q", got)
+	}
+	if stResp2.Header.Get("ETag") != "" || stResp2.Header.Get("Last-Modified") != "" {
+		t.Fatalf("expected ETag/Last-Modified stripped even on passthrough Status")
+	}
+}

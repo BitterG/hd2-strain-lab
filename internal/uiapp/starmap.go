@@ -628,7 +628,15 @@ func (a *App) buildStarMap(c *ui.Context) {
 						a.handleMapSelect(pid, ev.Mods)
 						return true
 					} else if ev.Mods&(ui.Ctrl|ui.Shift) == 0 && !m.PickingSource && !m.PickingCopyTarget {
+						if a.draftDirty() {
+							if err := a.applyDraftToSelection(nil); err != nil {
+								a.toastMsg = "当前星球未保存修改无效: " + err.Error()
+								return true
+							}
+							a.toastMsg = "已自动保存修改并下发"
+						}
 						a.selectedIDs = nil
+						a.syncDraftFromSelection()
 						return true
 					}
 				}
@@ -988,6 +996,14 @@ func (a *App) handleMapSelect(pid int, mods ui.Modifiers) {
 	if a.starMap.PickingCopyTarget {
 		_ = a.applyCopyEffectsTo(pid)
 		return
+	}
+	if mods&(ui.Ctrl|ui.Shift) == 0 && len(a.selectedIDs) > 0 &&
+		!(len(a.selectedIDs) == 1 && a.selectedIDs[0] == pid) && a.draftDirty() {
+		if err := a.applyDraftToSelection(nil); err != nil {
+			a.toastMsg = "当前星球未保存修改无效: " + err.Error()
+			return
+		}
+		a.toastMsg = "已自动保存上一颗星球修改并下发"
 	}
 	if mods&ui.Ctrl != 0 {
 		idx := slices.Index(a.selectedIDs, pid)

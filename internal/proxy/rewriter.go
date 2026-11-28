@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"slices"
 	"strconv"
@@ -163,6 +164,10 @@ func RewriteStatus(raw []byte, plan config.Plan, ctx *RewriteContext) ([]byte, R
 		return raw, summary, err
 	}
 	if len(targets) == 0 && len(disabledGlobalList) == 0 {
+		if ctx != nil {
+			clear(ctx.CampaignIDs)
+			clear(ctx.DefenseStates)
+		}
 		return raw, summary, nil
 	}
 	disabledGlobal := make(map[int]bool, len(disabledGlobalList))
@@ -257,6 +262,10 @@ func RewriteStatus(raw []byte, plan config.Plan, ctx *RewriteContext) ([]byte, R
 		activeTargets = append(activeTargets, t)
 	}
 	if len(activeTargets) == 0 && len(disabledGlobal) == 0 {
+		if ctx != nil {
+			clear(ctx.CampaignIDs)
+			clear(ctx.DefenseStates)
+		}
 		return raw, summary, nil
 	}
 
@@ -662,6 +671,12 @@ func RewriteStatus(raw []byte, plan config.Plan, ctx *RewriteContext) ([]byte, R
 		}
 	}
 
+	nextCampaignIDs := make(map[int]int)
+	nextDefenseStates := make(map[int]DefenseState)
+	if ctx != nil && ctx.DefenseStates == nil {
+		ctx.DefenseStates = make(map[int]DefenseState)
+	}
+
 	for _, t := range activeTargets {
 		requestedRace := t.CampaignRace
 		if requestedRace == 0 && t.Owner >= 2 && t.Owner <= 4 {
@@ -696,13 +711,16 @@ func RewriteStatus(raw []byte, plan config.Plan, ctx *RewriteContext) ([]byte, R
 			race = inferEnemy(t)
 		}
 		if current == nil {
-			cid := ctx.CampaignIDs[t.Planet]
+			var cid int
+			if ctx != nil && ctx.CampaignIDs != nil {
+				cid = ctx.CampaignIDs[t.Planet]
+			}
 			if cid == 0 || usedCampaignIDs[cid] {
 				maxCampaignID++
 				cid = maxCampaignID
 			}
 			usedCampaignIDs[cid] = true
-			ctx.CampaignIDs[t.Planet] = cid
+			nextCampaignIDs[t.Planet] = cid
 			current = map[string]any{
 				"id":          cid,
 				"planetIndex": t.Planet,
@@ -730,11 +748,34 @@ func RewriteStatus(raw []byte, plan config.Plan, ctx *RewriteContext) ([]byte, R
 		}
 
 		if t.CampaignType == 4 {
-			if err := applyDefense(res, t, current, ctx.DefenseStates, planetByID); err != nil {
+			var states map[int]DefenseState
+			if ctx != nil {
+				states = ctx.DefenseStates
+			} else {
+				states = make(map[int]DefenseState)
+			}
+			if err := applyDefense(res, t, current, states, planetByID); err != nil {
 				summary.Notes = append(summary.Notes, fmt.Sprintf("星球 #%d 防守配置跳过: %v", t.Planet, err))
 			} else {
 				summary.ChangedCount++
+				if st, ok := states[t.Planet]; ok {
+					nextDefenseStates[t.Planet] = st
+				}
 			}
+		}
+	}
+	if ctx != nil {
+		if ctx.CampaignIDs == nil {
+			ctx.CampaignIDs = nextCampaignIDs
+		} else {
+			clear(ctx.CampaignIDs)
+			maps.Copy(ctx.CampaignIDs, nextCampaignIDs)
+		}
+		if ctx.DefenseStates == nil {
+			ctx.DefenseStates = nextDefenseStates
+		} else {
+			clear(ctx.DefenseStates)
+			maps.Copy(ctx.DefenseStates, nextDefenseStates)
 		}
 	}
 	res["campaigns"] = campaigns

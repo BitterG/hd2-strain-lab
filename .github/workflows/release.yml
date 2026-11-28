@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag name (e.g. v1.2.1)'
+        description: 'Release tag name (e.g. v1.3.1)'
         required: true
-        default: 'v1.2.1'
+        default: 'v1.3.1'
 
 permissions:
   contents: write
@@ -44,15 +44,26 @@ jobs:
       - name: Create or Update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           $tag = "${{ github.event.inputs.tag || github.ref_name }}"
+          $ErrorActionPreference = "Continue"
           gh release view "$tag" *> $null
-          if ($LASTEXITCODE -eq 0) {
+          $exists = ($LASTEXITCODE -eq 0)
+          $ErrorActionPreference = "Stop"
+
+          if ($exists) {
+            gh release edit "$tag" `
+              --title "HD2 Strain Lab $tag" `
+              --notes-file CHANGELOG.md `
+              --latest
             gh release upload "$tag" .\hd2-strain-lab.exe .\SHA256SUMS.txt --clobber
           } else {
             gh release create "$tag" `
               --title "HD2 Strain Lab $tag" `
               --notes-file CHANGELOG.md `
+              --latest `
               .\hd2-strain-lab.exe `
               .\SHA256SUMS.txt
           }
